@@ -1,0 +1,96 @@
+{
+  "character": "dafeiyu",
+  "version": 1,
+  "frame_size": {
+    "w": 512,
+    "h": 512
+  },
+  "anchor": {
+    "x": 0.5,
+    "y": 0.89,
+    "pixels": [
+      256,
+      456
+    ]
+  },
+  "facing": "right",
+  "actions": [
+    {
+      "name": "idle",
+      "count": 8,
+      "fps": 8,
+      "loop": true,
+      "sheet": "sheets/dafeiyu_idle.png",
+      "preview": "previews/dafeiyu_idle.webp"
+    },
+    {
+      "name": "run",
+      "count": 8,
+      "fps": 12,
+      "loop": true,
+      "sheet": "sheets/dafeiyu_run.png",
+      "preview": "previews/dafeiyu_run.webp"
+    },
+    {
+      "name": "jump",
+      "count": 6,
+      "fps": 12,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_jump.png",
+      "preview": "previews/dafeiyu_jump.webp"
+    },
+    {
+      "name": "land",
+      "count": 6,
+      "fps": 14,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_land.png",
+      "preview": "previews/dafeiyu_land.webp"
+    },
+    {
+      "name": "dash",
+      "count": 6,
+      "fps": 16,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_dash.png",
+      "preview": "previews/dafeiyu_dash.webp"
+    },
+    {
+      "name": "attack",
+      "count": 6,
+      "fps": 14,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_attack.png",
+      "preview": "previews/dafeiyu_attack.webp"
+    },
+    {
+      "name": "hurt",
+      "count": 5,
+      "fps": 12,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_hurt.png",
+      "preview": "previews/dafeiyu_hurt.webp"
+    },
+    {
+      "name": "die",
+      "count": 6,
+      "fps": 10,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_die.png",
+      "preview": "previews/dafeiyu_die.webp"
+    },
+    {
+      "name": "attack_special",
+      "count": 8,
+      "fps": 12,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_attack_special.png",
+      "preview": "previews/dafeiyu_attack_special.webp"
+    }
+  ],
+  "notes": [
+    "All output PNGs use transparent alpha.",
+    "Playback order follows zero-padded filenames.",
+    "Use the same anchor for each frame; do not use Template/*.json for this character."
+  ]
+}

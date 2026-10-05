@@ -1,0 +1,184 @@
+{
+  "schema": "dafeiyu-sprites-v1",
+  "action": "idle",
+  "source": "AI-generated from asserts/refer/dafeiyu-game-identity.png; not aligned to Hollow Knight template JSON",
+  "sheet": "dafeiyu_idle.png",
+  "frame_size": {
+    "w": 512,
+    "h": 512
+  },
+  "anchor": {
+    "x": 0.5,
+    "y": 0.89,
+    "pixels": [
+      256,
+      456
+    ]
+  },
+  "fps": 8,
+  "loop": true,
+  "frames": [
+    {
+      "filename": "frames/idle/idle_00.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_01.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_02.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_03.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_04.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_05.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_06.png",
+      "duration_ms": 125
+    },
+    {
+      "filename": "frames/idle/idle_07.png",
+      "duration_ms": 125
+    }
+  ],
+  "atlas_frames": {
+    "idle_00.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_01.png": {
+      "frame": {
+        "x": 512,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_02.png": {
+      "frame": {
+        "x": 1024,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_03.png": {
+      "frame": {
+        "x": 1536,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_04.png": {
+      "frame": {
+        "x": 0,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_05.png": {
+      "frame": {
+        "x": 512,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_06.png": {
+      "frame": {
+        "x": 1024,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "idle_07.png": {
+      "frame": {
+        "x": 1536,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    }
+  }
+}

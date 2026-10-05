@@ -1,0 +1,184 @@
+{
+  "schema": "dafeiyu-sprites-v1",
+  "action": "attack_special",
+  "source": "AI-generated from asserts/refer/dafeiyu-game-identity.png; not aligned to Hollow Knight template JSON",
+  "sheet": "dafeiyu_attack_special.png",
+  "frame_size": {
+    "w": 512,
+    "h": 512
+  },
+  "anchor": {
+    "x": 0.5,
+    "y": 0.89,
+    "pixels": [
+      256,
+      456
+    ]
+  },
+  "fps": 12,
+  "loop": false,
+  "frames": [
+    {
+      "filename": "frames/attack_special/attack_special_00.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_01.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_02.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_03.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_04.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_05.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_06.png",
+      "duration_ms": 83
+    },
+    {
+      "filename": "frames/attack_special/attack_special_07.png",
+      "duration_ms": 83
+    }
+  ],
+  "atlas_frames": {
+    "attack_special_00.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_01.png": {
+      "frame": {
+        "x": 512,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_02.png": {
+      "frame": {
+        "x": 1024,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_03.png": {
+      "frame": {
+        "x": 1536,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_04.png": {
+      "frame": {
+        "x": 0,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_05.png": {
+      "frame": {
+        "x": 512,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_06.png": {
+      "frame": {
+        "x": 1024,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "attack_special_07.png": {
+      "frame": {
+        "x": 1536,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    }
+  }
+}

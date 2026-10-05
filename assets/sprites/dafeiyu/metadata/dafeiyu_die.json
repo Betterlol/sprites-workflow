@@ -1,0 +1,144 @@
+{
+  "schema": "dafeiyu-sprites-v1",
+  "action": "die",
+  "source": "AI-generated from asserts/refer/dafeiyu-game-identity.png; not aligned to Hollow Knight template JSON",
+  "sheet": "dafeiyu_die.png",
+  "frame_size": {
+    "w": 512,
+    "h": 512
+  },
+  "anchor": {
+    "x": 0.5,
+    "y": 0.89,
+    "pixels": [
+      256,
+      456
+    ]
+  },
+  "fps": 10,
+  "loop": false,
+  "frames": [
+    {
+      "filename": "frames/die/die_00.png",
+      "duration_ms": 100
+    },
+    {
+      "filename": "frames/die/die_01.png",
+      "duration_ms": 100
+    },
+    {
+      "filename": "frames/die/die_02.png",
+      "duration_ms": 100
+    },
+    {
+      "filename": "frames/die/die_03.png",
+      "duration_ms": 100
+    },
+    {
+      "filename": "frames/die/die_04.png",
+      "duration_ms": 100
+    },
+    {
+      "filename": "frames/die/die_05.png",
+      "duration_ms": 100
+    }
+  ],
+  "atlas_frames": {
+    "die_00.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "die_01.png": {
+      "frame": {
+        "x": 512,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "die_02.png": {
+      "frame": {
+        "x": 1024,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "die_03.png": {
+      "frame": {
+        "x": 1536,
+        "y": 0,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "die_04.png": {
+      "frame": {
+        "x": 0,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    },
+    "die_05.png": {
+      "frame": {
+        "x": 512,
+        "y": 512,
+        "w": 512,
+        "h": 512
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.89,
+        "pixels": [
+          256,
+          456
+        ]
+      }
+    }
+  }
+}
