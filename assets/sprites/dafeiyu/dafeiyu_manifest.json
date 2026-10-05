@@ -1,16 +1,16 @@
 {
   "character": "dafeiyu",
-  "version": 1,
+  "version": 2,
   "frame_size": {
-    "w": 512,
-    "h": 512
+    "w": 640,
+    "h": 640
   },
   "anchor": {
     "x": 0.5,
     "y": 0.89,
     "pixels": [
-      256,
-      456
+      320,
+      570
     ]
   },
   "facing": "right",
@@ -91,6 +91,7 @@
   "notes": [
     "All output PNGs use transparent alpha.",
     "Playback order follows zero-padded filenames.",
+    "Frames are reconstructed from alpha-connected character silhouettes, so generated sheet overflow is retained instead of cropped at nominal grid lines.",
     "Use the same anchor for each frame; do not use Template/*.json for this character."
   ]
 }
