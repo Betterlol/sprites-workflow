@@ -37,6 +37,9 @@ ACTIONS = {
     "attack": {"file": "attack.png", "cols": 3, "rows": 2, "fps": 14, "loop": False},
     "hurt": {"file": "hurt.png", "cols": 5, "rows": 1, "fps": 12, "loop": False},
     "die": {"file": "die.png", "cols": 6, "rows": 1, "fps": 10, "loop": False},
+    # The existing die_05 output is retained byte-for-byte as this action's
+    # opening frame, followed by five generated dissolve/true-form frames.
+    "die_reveal": {"file": "die_reveal.png", "cols": 5, "rows": 1, "fps": 10, "loop": False, "prepend": "die_05_start.png"},
     "attack_special": {"file": "attack_special.png", "cols": 4, "rows": 2, "fps": 12, "loop": False},
 }
 
@@ -168,14 +171,23 @@ def build_action(name: str, spec: dict) -> dict:
     frame_dir.mkdir(parents=True, exist_ok=True)
     normalized: list[Image.Image] = []
     frame_entries = []
-    for index, (raw, box) in enumerate(zip(raw_frames, boxes)):
+    if "prepend" in spec:
+        start = Image.open(GENERATED / spec["prepend"]).convert("RGBA")
+        if start.size != (FRAME, FRAME):
+            raise ValueError(f"{name}: prepended frame must be {FRAME}x{FRAME}, got {start.size}")
+        filename = f"{name}_00.png"
+        start.save(frame_dir / filename, optimize=True)
+        normalized.append(start)
+        frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
+
+    for index, (raw, box) in enumerate(zip(raw_frames, boxes), start=len(normalized)):
         cropped = raw.crop(box)
         new_size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
         cropped = cropped.resize(new_size, Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", (FRAME, FRAME), (0, 0, 0, 0))
         # Center horizontally; all non-prone actions share a fixed ground anchor.
         x = (FRAME - cropped.width) // 2
-        if name == "die" and index >= 3:
+        if (name == "die" and index >= 3) or name == "die_reveal":
             y = GROUND_Y - cropped.height + 24
         elif name in {"jump", "land"} and index == 0:
             y = GROUND_Y - cropped.height - 50
