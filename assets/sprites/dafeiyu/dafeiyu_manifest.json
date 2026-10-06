@@ -89,7 +89,7 @@
     },
     {
       "name": "eat_rice",
-      "count": 10,
+      "count": 8,
       "fps": 10,
       "loop": false,
       "sheet": "sheets/dafeiyu_eat_rice.png",

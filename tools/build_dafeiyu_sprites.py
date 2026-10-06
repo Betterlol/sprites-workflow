@@ -40,9 +40,9 @@ ACTIONS = {
     # The existing die_05 output is retained byte-for-byte as this action's
     # opening frame, followed by five generated dissolve/true-form frames.
     "die_reveal": {"file": "die_reveal.png", "cols": 5, "rows": 1, "fps": 10, "loop": False, "prepend": "die_05_start.png"},
-    # The rice emote starts and ends on the exact same idle frame, so it can
-    # return to the idle loop with no visual pose snap.
-    "eat_rice": {"file": "eat_rice.png", "cols": 4, "rows": 2, "fps": 10, "loop": False, "prepend": "idle_00_start.png", "append": "idle_00_start.png"},
+    # Keep the approved full-bowl and nearly-empty-bowl poses as exact anchors.
+    # The six middle frames preserve handedness while visibly reducing the rice.
+    "eat_rice": {"file": "eat_rice_middle.png", "cols": 3, "rows": 2, "fps": 10, "loop": False, "prepend": "eat_rice_03_start.png", "append": "eat_rice_07_end.png"},
     "attack_special": {"file": "attack_special.png", "cols": 4, "rows": 2, "fps": 12, "loop": False},
 }
 
