@@ -88,6 +88,14 @@
       "preview": "previews/dafeiyu_die_reveal.webp"
     },
     {
+      "name": "eat_rice",
+      "count": 10,
+      "fps": 10,
+      "loop": false,
+      "sheet": "sheets/dafeiyu_eat_rice.png",
+      "preview": "previews/dafeiyu_eat_rice.webp"
+    },
+    {
       "name": "attack_special",
       "count": 8,
       "fps": 12,

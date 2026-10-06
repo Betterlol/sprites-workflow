@@ -40,6 +40,9 @@ ACTIONS = {
     # The existing die_05 output is retained byte-for-byte as this action's
     # opening frame, followed by five generated dissolve/true-form frames.
     "die_reveal": {"file": "die_reveal.png", "cols": 5, "rows": 1, "fps": 10, "loop": False, "prepend": "die_05_start.png"},
+    # The rice emote starts and ends on the exact same idle frame, so it can
+    # return to the idle loop with no visual pose snap.
+    "eat_rice": {"file": "eat_rice.png", "cols": 4, "rows": 2, "fps": 10, "loop": False, "prepend": "idle_00_start.png", "append": "idle_00_start.png"},
     "attack_special": {"file": "attack_special.png", "cols": 4, "rows": 2, "fps": 12, "loop": False},
 }
 
@@ -198,6 +201,16 @@ def build_action(name: str, spec: dict) -> dict:
         filename = f"{name}_{index:02d}.png"
         canvas.save(frame_dir / filename, optimize=True)
         normalized.append(canvas)
+        frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
+
+    if "append" in spec:
+        end = Image.open(GENERATED / spec["append"]).convert("RGBA")
+        if end.size != (FRAME, FRAME):
+            raise ValueError(f"{name}: appended frame must be {FRAME}x{FRAME}, got {end.size}")
+        index = len(normalized)
+        filename = f"{name}_{index:02d}.png"
+        end.save(frame_dir / filename, optimize=True)
+        normalized.append(end)
         frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
 
     # A 4-column atlas keeps every single action sheet compact and consistent.
