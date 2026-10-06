@@ -163,9 +163,6 @@ def build_action(name: str, spec: dict) -> dict:
     # This prevents the common AI-sheet issue of per-frame scale pulsing.
     source_height = max(box[3] - box[1] for box in boxes if box)
     scale = min(1.0, 432 / source_height) if source_height else 1.0
-    if name == "attack_special":
-        # Effects are allowed to extend upward, while preserving readable body size.
-        scale = min(scale, 0.92)
 
     frame_dir = OUT / "frames" / name
     frame_dir.mkdir(parents=True, exist_ok=True)
