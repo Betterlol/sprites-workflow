@@ -39,10 +39,10 @@ ACTIONS = {
     "die": {"file": "die.png", "cols": 6, "rows": 1, "fps": 10, "loop": False},
     # The existing die_05 output is retained byte-for-byte as this action's
     # opening frame, followed by five generated dissolve/true-form frames.
-    "die_reveal": {"file": "die_reveal.png", "cols": 5, "rows": 1, "fps": 10, "loop": False, "prepend": "die_05_start.png"},
+    "die_reveal": {"file": "die_reveal.png", "cols": 5, "rows": 1, "fps": 10, "loop": False, "prepend": ["die_05_start.png"]},
     # Keep the approved full-bowl and nearly-empty-bowl poses as exact anchors.
     # The six middle frames preserve handedness while visibly reducing the rice.
-    "eat_rice": {"file": "eat_rice_middle.png", "cols": 3, "rows": 2, "fps": 10, "loop": False, "prepend": "eat_rice_03_start.png", "append": "eat_rice_07_end.png"},
+    "eat_rice": {"file": "eat_rice_middle.png", "cols": 3, "rows": 2, "fps": 6, "loop": False, "prepend": ["eat_rice_00_start.png", "eat_rice_01_start.png", "eat_rice_02_start.png", "eat_rice_03_start.png"], "append": ["eat_rice_07_end.png", "eat_rice_08_end.png", "eat_rice_09_end.png"]},
     "attack_special": {"file": "attack_special.png", "cols": 4, "rows": 2, "fps": 12, "loop": False},
 }
 
@@ -175,13 +175,16 @@ def build_action(name: str, spec: dict) -> dict:
     normalized: list[Image.Image] = []
     frame_entries = []
     if "prepend" in spec:
-        start = Image.open(GENERATED / spec["prepend"]).convert("RGBA")
-        if start.size != (FRAME, FRAME):
-            raise ValueError(f"{name}: prepended frame must be {FRAME}x{FRAME}, got {start.size}")
-        filename = f"{name}_00.png"
-        start.save(frame_dir / filename, optimize=True)
-        normalized.append(start)
-        frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
+        assert isinstance(spec["prepend"], list)
+        for pre in spec["prepend"]:
+            start = Image.open(GENERATED / pre).convert("RGBA")
+            if start.size != (FRAME, FRAME):
+                raise ValueError(f"{name}: prepended frame must be {FRAME}x{FRAME}, got {start.size}")
+            index = len(normalized)
+            filename = f"{name}_{index:02d}.png"
+            start.save(frame_dir / filename, optimize=True)
+            normalized.append(start)
+            frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
 
     for index, (raw, box) in enumerate(zip(raw_frames, boxes), start=len(normalized)):
         cropped = raw.crop(box)
@@ -204,14 +207,16 @@ def build_action(name: str, spec: dict) -> dict:
         frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
 
     if "append" in spec:
-        end = Image.open(GENERATED / spec["append"]).convert("RGBA")
-        if end.size != (FRAME, FRAME):
-            raise ValueError(f"{name}: appended frame must be {FRAME}x{FRAME}, got {end.size}")
-        index = len(normalized)
-        filename = f"{name}_{index:02d}.png"
-        end.save(frame_dir / filename, optimize=True)
-        normalized.append(end)
-        frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
+        assert isinstance(spec["append"], list)
+        for app in spec["append"]:
+            end = Image.open(GENERATED / app).convert("RGBA")
+            if end.size != (FRAME, FRAME):
+                raise ValueError(f"{name}: appended frame must be {FRAME}x{FRAME}, got {end.size}")
+            index = len(normalized)
+            filename = f"{name}_{index:02d}.png"
+            end.save(frame_dir / filename, optimize=True)
+            normalized.append(end)
+            frame_entries.append({"filename": f"frames/{name}/{filename}", "duration_ms": round(1000 / spec["fps"])})
 
     # A 4-column atlas keeps every single action sheet compact and consistent.
     sheet_cols = min(4, len(normalized))

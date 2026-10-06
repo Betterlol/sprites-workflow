@@ -89,8 +89,8 @@
     },
     {
       "name": "eat_rice",
-      "count": 8,
-      "fps": 10,
+      "count": 13,
+      "fps": 6,
       "loop": false,
       "sheet": "sheets/dafeiyu_eat_rice.png",
       "preview": "previews/dafeiyu_eat_rice.webp"
