@@ -16,6 +16,8 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+from texturepacker import TexturePackerFrame, write_texturepacker_hash
+
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATED = ROOT / "assets" / "sprites" / "dafeiyu_sources"
@@ -223,13 +225,26 @@ def build_action(name: str, spec: dict) -> dict:
     sheet_rows = (len(normalized) + sheet_cols - 1) // sheet_cols
     sheet = Image.new("RGBA", (sheet_cols * FRAME, sheet_rows * FRAME), (0, 0, 0, 0))
     atlas_frames = {}
+    texturepacker_frames = []
+    duration_ms = round(1000 / spec["fps"])
     for index, frame in enumerate(normalized):
         x, y = (index % sheet_cols) * FRAME, (index // sheet_cols) * FRAME
+        filename = f"{name}_{index:02d}.png"
         sheet.alpha_composite(frame, (x, y))
-        atlas_frames[f"{name}_{index:02d}.png"] = {"frame": {"x": x, "y": y, "w": FRAME, "h": FRAME}, "anchor": ANCHOR}
+        atlas_frames[filename] = {"frame": {"x": x, "y": y, "w": FRAME, "h": FRAME}, "anchor": ANCHOR}
+        texturepacker_frames.append(
+            TexturePackerFrame(filename, x, y, FRAME, FRAME, duration_ms)
+        )
     sheet_path = OUT / "sheets" / f"dafeiyu_{name}.png"
     sheet_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(sheet_path, optimize=True)
+    write_texturepacker_hash(
+        sheet_path.with_suffix(".json"),
+        image_name=sheet_path.name,
+        sheet_width=sheet.width,
+        sheet_height=sheet.height,
+        frames=texturepacker_frames,
+    )
 
     # Preview only: a transparent animated WebP confirms the exact frame order
     # without making a game runtime depend on an animated format.
