@@ -20,9 +20,9 @@ from sprite_pipeline.animation import playback
 from sprite_pipeline.cli import main
 from sprite_pipeline.config import load_config
 from sprite_pipeline.export import pack_action, preview_action
-from sprite_pipeline.extract import cut_frames, extract_action
+from sprite_pipeline.extract import cut_frames, extract_source
 from sprite_pipeline.files import read_image
-from sprite_pipeline.process import process_action
+from sprite_pipeline.process import process_source
 from sprite_pipeline.select import select_action
 
 
@@ -35,11 +35,11 @@ class SpritePipelineTests(unittest.TestCase):
         self.source = self.root / "source"
         self.source.mkdir()
         self.data = {
-            "version": 1, "character": "test", "frame_size": [16, 16],
+            "version": 2, "character": "test", "frame_size": [16, 16],
             "anchor": {"x": 0.5, "y": 0.875, "pixels": [8, 14]},
             "defaults": {"fps": 10, "loop": False, "process": {"mode": "copy"}},
+            "sources": {"walk.png": {"extract": {"method": "grid", "cols": 3, "rows": 1}}},
             "actions": {"walk": {
-                "extract": {"file": "walk.png", "method": "grid", "cols": 3, "rows": 1},
                 "sprites": ["walk/002.png", "walk/000.png", "walk/001.png"],
             }},
         }
@@ -54,8 +54,8 @@ class SpritePipelineTests(unittest.TestCase):
 
     def prepare(self):
         cfg = self.config()
-        extract_action(cfg, "walk")
-        process_action(cfg, "walk")
+        extract_source(cfg, "walk.png")
+        process_source(cfg, "walk.png")
         select_action(cfg, "walk")
         return cfg
 
@@ -87,6 +87,15 @@ class SpritePipelineTests(unittest.TestCase):
         self.assertEqual(frames[0].getpixel((17, 2)), (255, 255, 255, 255))
         self.assertEqual(frames[0].getpixel((16, 2))[3], 0)
 
+    def test_component_extraction_discovers_layout_without_action_or_grid(self):
+        image = Image.new("RGBA", (40, 40))
+        boxes = [(2, 2, 10, 10), (24, 3, 32, 11), (2, 25, 10, 33), (24, 24, 32, 32)]
+        for box, color in zip(boxes, ("red", "green", "blue", "yellow")):
+            image.paste(color, box)
+        frames, found = cut_frames(image, {"min_component_pixels": 1, "major_min_pixels": 4, "major_fraction": 0})
+        self.assertEqual(found, boxes)
+        self.assertEqual(len(frames), 4)
+
     def test_explicit_boxes_are_exact_and_invalid_boxes_are_rejected(self):
         source = read_image(self.source / "walk.png")
         frames, _ = cut_frames(source, {"method": "boxes", "boxes": [[32, 0, 48, 16], [0, 0, 16, 16]]})
@@ -97,30 +106,34 @@ class SpritePipelineTests(unittest.TestCase):
     def test_processing_uses_one_scale_and_configured_offsets(self):
         self.data["frame_size"] = [32, 32]
         self.data["anchor"] = {"x": 0.5, "y": 0.875, "pixels": [16, 28]}
-        self.data["actions"]["walk"].pop("extract")
-        self.data["actions"]["walk"]["process"] = {
-            "mode": "anchor", "fit_height": 10, "max_scale": 1,
-            "inputs": {key: {"file": f"{key}.png"} for key in ("tall", "short")},
-            "overrides": {"short": {"offset": [2, -3]}},
+        self.data["sources"]["walk.png"] = {
+            "extract": {"method": "grid", "cols": 2, "rows": 1},
+            "process": {
+                "mode": "anchor", "fit_height": 10, "max_scale": 1,
+                "overrides": {"001": {"offset": [2, -3]}},
+            },
         }
-        Image.new("RGBA", (8, 20), "red").save(self.source / "tall.png")
-        Image.new("RGBA", (8, 10), "blue").save(self.source / "short.png")
+        sheet = Image.new("RGBA", (16, 20))
+        sheet.paste(Image.new("RGBA", (8, 20), "red"), (0, 0))
+        sheet.paste(Image.new("RGBA", (8, 10), "blue"), (8, 0))
+        sheet.save(self.source / "walk.png")
         cfg = self.config()
-        process_action(cfg, "walk")
-        tall = read_image(cfg.directory("processed_sprites") / "walk/tall.png")
-        short = read_image(cfg.directory("processed_sprites") / "walk/short.png")
+        extract_source(cfg, "walk.png")
+        process_source(cfg, "walk.png")
+        tall = read_image(cfg.directory("processed_sprites") / "walk/000.png")
+        short = read_image(cfg.directory("processed_sprites") / "walk/001.png")
         self.assertEqual(tall.getbbox(), (14, 18, 18, 28))
         self.assertEqual(short.getbbox(), (16, 20, 20, 25))
-        self.assertFalse(cfg.directory("source_sprites").exists())
         self.assertFalse(cfg.directory("sprites").exists())
 
-    def test_imports_and_promotion_copy_approved_bytes_and_remove_stale_numbers(self):
-        self.data["actions"]["walk"]["imports"] = {"start": "approved.png"}
-        Image.new("RGBA", (16, 16), "yellow").save(self.source / "approved.png", compress_level=1)
-        self.data["actions"]["walk"]["sprites"] = ["walk/start.png", "walk/002.png", "walk/start.png"]
+    def test_promotion_copies_processed_bytes_and_removes_stale_numbers(self):
+        self.data["actions"]["walk"]["sprites"] = ["walk/000.png", "walk/002.png", "walk/000.png"]
         cfg = self.prepare()
+        approved = cfg.directory("processed_sprites") / "walk/000.png"
+        Image.new("RGBA", cfg.size, "yellow").save(approved, compress_level=1)
+        select_action(cfg, "walk")
         final = cfg.directory("sprites") / "walk"
-        self.assertEqual((final / "walk_00.png").read_bytes(), (self.source / "approved.png").read_bytes())
+        self.assertEqual((final / "walk_00.png").read_bytes(), approved.read_bytes())
         self.assertEqual((final / "walk_02.png").read_bytes(), (final / "walk_00.png").read_bytes())
         review = final / "review.png"
         review.write_bytes(b"user review")
@@ -181,13 +194,12 @@ class SpritePipelineTests(unittest.TestCase):
         final = cfg.directory("sprites") / "walk/walk_00.png"
         Image.new("RGBA", cfg.size, "purple").save(final)
         before = final.read_bytes()
-        extract_action(cfg, "walk")
-        process_action(cfg, "walk")
+        extract_source(cfg, "walk.png")
+        process_source(cfg, "walk.png")
         self.assertEqual(final.read_bytes(), before)
 
     def test_single_action_pack_preserves_other_actions_and_manifest_entries(self):
-        self.data["actions"]["rest"] = copy.deepcopy(self.data["actions"]["walk"])
-        self.data["actions"]["rest"]["sprites"] = ["rest/000.png", "rest/001.png"]
+        self.data["actions"]["rest"] = {"sprites": ["walk/000.png", "walk/001.png"]}
         cfg = self.config()
         self.assertEqual(self.run_cli("build", "--no-preview")[0], 0)
         rest = cfg.directory("spritesheets") / "test_rest.png"
@@ -228,9 +240,9 @@ class SpritePipelineTests(unittest.TestCase):
         cfg = self.prepare()
         directory = cfg.directory("processed_sprites") / "walk"
         before = {path: path.read_bytes() for path in directory.iterdir()}
-        self.data["actions"]["walk"]["process"] = {"mode": "anchor", "scale": 2}
+        self.data["sources"]["walk.png"]["process"] = {"mode": "anchor", "scale": 2}
         with self.assertRaisesRegex(ValueError, "clipped"):
-            process_action(self.config(), "walk")
+            process_source(self.config(), "walk.png")
         self.assertEqual(before, {path: path.read_bytes() for path in directory.iterdir()})
 
     def test_invalid_preview_fails_before_changing_runtime_outputs(self):
@@ -272,6 +284,84 @@ class SpritePipelineTests(unittest.TestCase):
         self.assertTrue((alternate / "spritesheets/test_walk.json").exists())
         self.assertTrue((alternate / "webp/test_walk.webp").exists())
         self.assertFalse((self.root / "sprites").exists())
+
+    def test_all_originals_are_discovered_and_processed_before_actions_exist(self):
+        self.data["actions"] = {}
+        self.data["defaults"]["extract"] = {"min_component_pixels": 1, "major_min_pixels": 4, "major_fraction": 0}
+        # This original has no per-file rule and is not referenced by any action.
+        Image.new("RGBA", (16, 16), "purple").save(self.source / "unused.png")
+        before = {p.name: p.read_bytes() for p in self.source.iterdir()}
+        cfg = self.config()
+        for stage in ("extract", "process"):
+            status, error = self.run_cli(stage)
+            self.assertEqual(status, 0, error)
+        self.assertEqual(cfg.discover_sources(), ["unused.png", "walk.png"])
+        self.assertTrue((cfg.directory("source_sprites") / "unused/000.png").exists())
+        self.assertTrue((cfg.directory("processed_sprites") / "unused/000.png").exists())
+        self.assertTrue((cfg.directory("processed_sprites") / "walk/002.png").exists())
+        self.assertFalse(cfg.directory("sprites").exists())
+        self.assertEqual(before, {p.name: p.read_bytes() for p in self.source.iterdir()})
+
+    def test_two_actions_reuse_the_same_processed_frame_without_copying_into_source(self):
+        self.data["actions"]["rest"] = {"sprites": ["walk/000.png", "walk/002.png"]}
+        cfg = self.config()
+        status, error = self.run_cli("build", "--no-preview")
+        self.assertEqual(status, 0, error)
+        common = (cfg.directory("processed_sprites") / "walk/002.png").read_bytes()
+        self.assertEqual((cfg.directory("sprites") / "walk/walk_00.png").read_bytes(), common)
+        self.assertEqual((cfg.directory("sprites") / "rest/rest_01.png").read_bytes(), common)
+        self.assertEqual([p.name for p in self.source.iterdir()], ["walk.png"])
+
+    def test_single_action_build_still_prepares_every_original(self):
+        self.data["sources"]["unused.png"] = {"extract": {"method": "image"}}
+        Image.new("RGBA", (16, 16), "yellow").save(self.source / "unused.png")
+        cfg = self.config()
+        status, error = self.run_cli("build", "--action", "walk", "--no-preview")
+        self.assertEqual(status, 0, error)
+        self.assertTrue((cfg.directory("processed_sprites") / "unused/000.png").exists())
+
+    def test_source_filter_uses_original_filename_and_mirrors_subdirectories(self):
+        (self.source / "extra").mkdir()
+        image = Image.new("RGBA", (16, 16), "yellow")
+        image.save(self.source / "extra/pose.png")
+        self.data["sources"]["extra/pose.png"] = {"extract": {"method": "image"}}
+        cfg = self.config()
+        for stage in ("extract", "process"):
+            status, error = self.run_cli(stage, "--source", "extra/pose.png")
+            self.assertEqual(status, 0, error)
+        output = cfg.directory("processed_sprites") / "extra/pose/000.png"
+        self.assertEqual(read_image(output).tobytes(), image.tobytes())
+        self.assertFalse((cfg.directory("processed_sprites") / "walk").exists())
+
+    def test_original_and_action_filters_cannot_be_confused(self):
+        cfg = self.config()
+        for arguments in (("extract", "--action", "walk"), ("process", "--action", "walk"), ("pack", "--source", "walk.png"), ("extract", "--source", "missing.png")):
+            with self.subTest(arguments=arguments):
+                status, _ = self.run_cli(*arguments)
+                self.assertEqual(status, 1)
+        self.assertFalse(cfg.directory("source_sprites").exists())
+
+    def test_source_rules_cannot_silently_skip_missing_images_or_collide_outputs(self):
+        self.data["sources"]["missing.png"] = {"extract": {"method": "image"}}
+        cfg = self.config()
+        with self.assertRaisesRegex(ValueError, "missing images"):
+            cfg.discover_sources()
+        del self.data["sources"]["missing.png"]
+        Image.new("RGB", (16, 16), "yellow").save(self.source / "walk.jpg")
+        with self.assertRaisesRegex(ValueError, "same output directory"):
+            self.config().discover_sources()
+
+    def test_legacy_action_extraction_and_source_imports_are_rejected(self):
+        baseline = copy.deepcopy(self.data)
+        for field in ("extract", "process", "imports"):
+            self.data = copy.deepcopy(baseline)
+            self.data["actions"]["walk"][field] = {}
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "actions only assemble"):
+                self.config()
+        self.data = copy.deepcopy(baseline)
+        self.data["defaults"]["process"]["inputs"] = {"start": {"file": "legacy_start.png"}}
+        with self.assertRaisesRegex(ValueError, "no longer supported"):
+            self.config()
 
 
 if __name__ == "__main__":

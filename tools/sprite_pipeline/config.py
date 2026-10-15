@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 OUTPUT_DIRS = ("source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 NAME = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
@@ -71,14 +72,47 @@ class Config:
         return inside(self.root, self.data["paths"].get(stage, stage))
 
     def action(self, name: str) -> dict:
-        return merge(self.data.get("defaults", {}), self.data["actions"][name])
+        defaults = {key: value for key, value in self.data.get("defaults", {}).items() if key not in {"extract", "process"}}
+        return merge(defaults, self.data["actions"][name])
+
+    def source_spec(self, filename: str) -> dict:
+        defaults = {key: self.data.get("defaults", {}).get(key, {}) for key in ("extract", "process")}
+        return merge(defaults, self.data.get("sources", {}).get(filename, {}))
+
+    def source_id(self, filename: str) -> str:
+        return Path(filename).with_suffix("").as_posix()
+
+    def discover_sources(self) -> list[str]:
+        """Discover every original image, regardless of action selections."""
+        if not self.source.is_dir():
+            raise FileNotFoundError(f"Source directory does not exist: {self.source}")
+        filenames = sorted(path.relative_to(self.source).as_posix() for path in self.source.rglob("*")
+                           if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES)
+        if not filenames:
+            raise ValueError(f"No source images found in {self.source}")
+        stale = set(self.data.get("sources", {})) - set(filenames)
+        if stale:
+            raise ValueError(f"Source rules refer to missing images: {', '.join(sorted(stale))}")
+        ids = {}
+        for filename in filenames:
+            inside(self.source, filename)
+            key = self.source_id(filename).casefold()
+            if key in ids:
+                raise ValueError(f"Source images share the same output directory: {ids[key]}, {filename}")
+            ids[key] = filename
+        # A file foo.png and nested foo/bar.png would mix inventories/outputs.
+        keys = [Path(key) for key in ids]
+        for i, key in enumerate(keys):
+            if any(key.is_relative_to(other) or other.is_relative_to(key) for other in keys[i + 1:]):
+                raise ValueError("Source image output directories must not contain each other")
+        return filenames
 
 
 def load_config(path: Path, output_root: Path | None = None) -> Config:
     path = path.resolve()
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("version") != 1:
-        raise ValueError("Unsupported pipeline config version; expected 1")
+    if data.get("version") != 2:
+        raise ValueError("Unsupported pipeline config version; expected 2 with separate sources and actions")
     if not NAME.fullmatch(data.get("character", "")):
         raise ValueError("character must contain only letters, numbers, underscores and hyphens")
     size = data.get("frame_size")
@@ -108,12 +142,33 @@ def load_config(path: Path, output_root: Path | None = None) -> Config:
                 raise ValueError("Output stage directories must be distinct and must not contain each other")
         if cfg.source.is_relative_to(directory) or directory.is_relative_to(cfg.source):
             raise ValueError("Source and output stage directories must not overlap")
-    if not isinstance(data.get("actions"), dict) or not data["actions"]:
-        raise ValueError("actions must be a nonempty object")
+    data.setdefault("actions", {})
+    if not isinstance(data["actions"], dict):
+        raise ValueError("actions must be an object (it may be empty while preparing sources)")
+    if not isinstance(data.get("sources", {}), dict):
+        raise ValueError("sources must be an object containing per-file extraction/processing rules")
+    if not isinstance(data.get("defaults", {}), dict) or "imports" in data.get("defaults", {}):
+        raise ValueError("defaults must be an object without legacy imports")
+    for filename, settings in data.get("sources", {}).items():
+        inside(cfg.source, filename)
+        if Path(filename).as_posix() != filename or Path(filename).suffix.lower() not in IMAGE_SUFFIXES:
+            raise ValueError(f"Source rule keys must be relative image filenames using '/' separators: {filename!r}")
+        if not isinstance(settings, dict) or set(settings) - {"extract", "process"}:
+            raise ValueError(f"{filename}: source rules may only contain extract and process")
+    for settings in [data.get("defaults", {}), *data.get("sources", {}).values()]:
+        for field in ("extract", "process"):
+            if field in settings and not isinstance(settings[field], dict):
+                raise ValueError(f"{field} rules must be objects; every source goes through extraction and processing")
+        if {"imports", "inputs"} & set(settings.get("process", {})) or "file" in settings.get("extract", {}):
+            raise ValueError("Source files are discovered automatically; imports/inputs/extract.file are no longer supported")
     for name in data["actions"]:
         if not NAME.fullmatch(name):
             raise ValueError(f"Invalid action name: {name!r}")
+        if not isinstance(data["actions"][name], dict):
+            raise ValueError(f"{name}: action configuration must be an object")
         spec = cfg.action(name)
+        if {"extract", "process", "imports"} & set(data["actions"][name]):
+            raise ValueError(f"{name}: actions only assemble processed sprites; put extraction/processing rules in sources")
         fps = positive(spec.get("fps", 12), f"{name}.fps")
         if round(1000 / fps) < 1:
             raise ValueError(f"{name}.fps gives a frame duration below 1ms")

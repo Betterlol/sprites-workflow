@@ -1,7 +1,7 @@
 """Dafeiyu preset for the shared sprite pipeline (default: repack final PNGs).
 
-Use extract/process for review, select to promote configured sprites, and pack
-to export them. `build` explicitly runs every stage and replaces selected frames.
+Use extract/process to prepare every original image, select to assemble actions,
+and pack to export them. `build` explicitly runs every stage.
 """
 
 from pathlib import Path

@@ -1,0 +1,47 @@
+{
+  "stage": "select",
+  "files": [
+    "attack_special_00.png",
+    "attack_special_01.png",
+    "attack_special_02.png",
+    "attack_special_03.png",
+    "attack_special_04.png",
+    "attack_special_05.png",
+    "attack_special_06.png",
+    "attack_special_07.png"
+  ],
+  "frames": [
+    {
+      "filename": "attack_special_00.png",
+      "processed_sprite": "attack_special/000.png"
+    },
+    {
+      "filename": "attack_special_01.png",
+      "processed_sprite": "attack_special/001.png"
+    },
+    {
+      "filename": "attack_special_02.png",
+      "processed_sprite": "attack_special/002.png"
+    },
+    {
+      "filename": "attack_special_03.png",
+      "processed_sprite": "attack_special/003.png"
+    },
+    {
+      "filename": "attack_special_04.png",
+      "processed_sprite": "attack_special/004.png"
+    },
+    {
+      "filename": "attack_special_05.png",
+      "processed_sprite": "attack_special/005.png"
+    },
+    {
+      "filename": "attack_special_06.png",
+      "processed_sprite": "attack_special/006.png"
+    },
+    {
+      "filename": "attack_special_07.png",
+      "processed_sprite": "attack_special/007.png"
+    }
+  ]
+}

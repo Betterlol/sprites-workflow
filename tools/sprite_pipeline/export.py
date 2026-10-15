@@ -69,7 +69,7 @@ def pack_action(cfg: Config, name: str) -> dict:
         staged.with_suffix(".json").replace(output.with_suffix(".json"))
     metadata = {
         "schema": cfg.data.get("metadata_schema", "sprite-pipeline-v1"), "action": name,
-        "source": cfg.data.get("source_description", (spec.get("extract") or {}).get("file", "configured loose PNGs")),
+        "source": cfg.data.get("source_description", "assembled from configured processed sprites"),
         "sheet": output.name, "frame_size": {"w": width, "h": height},
         "anchor": cfg.anchor, "fps": spec.get("fps", 12), "loop": spec.get("loop", False),
         "frames": [{"filename": path.relative_to(cfg.root).as_posix(), "duration_ms": duration} for path in paths],

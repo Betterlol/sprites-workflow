@@ -1,0 +1,37 @@
+{
+  "stage": "select",
+  "files": [
+    "jump_00.png",
+    "jump_01.png",
+    "jump_02.png",
+    "jump_03.png",
+    "jump_04.png",
+    "jump_05.png"
+  ],
+  "frames": [
+    {
+      "filename": "jump_00.png",
+      "processed_sprite": "jump/000.png"
+    },
+    {
+      "filename": "jump_01.png",
+      "processed_sprite": "jump/001.png"
+    },
+    {
+      "filename": "jump_02.png",
+      "processed_sprite": "jump/002.png"
+    },
+    {
+      "filename": "jump_03.png",
+      "processed_sprite": "jump/003.png"
+    },
+    {
+      "filename": "jump_04.png",
+      "processed_sprite": "jump/004.png"
+    },
+    {
+      "filename": "jump_05.png",
+      "processed_sprite": "jump/005.png"
+    }
+  ]
+}

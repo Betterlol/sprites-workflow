@@ -1,0 +1,37 @@
+{
+  "stage": "select",
+  "files": [
+    "dash_00.png",
+    "dash_01.png",
+    "dash_02.png",
+    "dash_03.png",
+    "dash_04.png",
+    "dash_05.png"
+  ],
+  "frames": [
+    {
+      "filename": "dash_00.png",
+      "processed_sprite": "dash/000.png"
+    },
+    {
+      "filename": "dash_01.png",
+      "processed_sprite": "dash/001.png"
+    },
+    {
+      "filename": "dash_02.png",
+      "processed_sprite": "dash/002.png"
+    },
+    {
+      "filename": "dash_03.png",
+      "processed_sprite": "dash/003.png"
+    },
+    {
+      "filename": "dash_04.png",
+      "processed_sprite": "dash/004.png"
+    },
+    {
+      "filename": "dash_05.png",
+      "processed_sprite": "dash/005.png"
+    }
+  ]
+}

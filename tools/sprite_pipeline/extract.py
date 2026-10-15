@@ -24,8 +24,10 @@ def distance(box, other) -> float:
 
 
 def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image], list[tuple]]:
-    cols = integer(spec["cols"], "extract.cols", 1)
-    rows = integer(spec["rows"], "extract.rows", 1)
+    if ("cols" in spec) != ("rows" in spec):
+        raise ValueError("Provide both extract.cols and extract.rows, or omit both for automatic component layout")
+    cols = integer(spec["cols"], "extract.cols", 1) if "cols" in spec else None
+    rows = integer(spec["rows"], "extract.rows", 1) if "rows" in spec else None
     threshold = integer(spec.get("alpha_threshold", 16), "extract.alpha_threshold", 1)
     if threshold > 255:
         raise ValueError("extract.alpha_threshold must be <= 255")
@@ -45,8 +47,10 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
     major_threshold = max(major_pixels, int(opaque.sum() * fraction))
     major = [item for item in components if item["size"] >= major_threshold]
     minor = [item for item in components if item["size"] < major_threshold]
-    expected = cols * rows
+    expected = cols * rows if cols is not None else None
     split = spec.get("split_widest")
+    if split is not None and expected is None:
+        raise ValueError("split_widest requires explicit cols and rows")
     if split is not None and len(major) == expected - 1 and major:
         overlap = integer(split.get("overlap", 0), "extract.split_widest.overlap")
         widest_index = max(range(len(major)), key=lambda i: major[i]["bbox"][2] - major[i]["bbox"][0])
@@ -58,12 +62,30 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
         xs = np.arange(mask.shape[1])[None, :]
         for part in (mask & (xs <= seam + overlap), mask & (xs >= seam - overlap)):
             major.append({"mask": part, "bbox": bbox(part), "size": int(part.sum())})
-    if len(major) != expected:
+    if not major:
+        raise ValueError("No character silhouettes found; adjust extraction thresholds or use grid/boxes/image")
+    if expected is not None and len(major) != expected:
         raise ValueError(f"Expected {expected} character silhouettes, found {len(major)}; adjust extraction config or use explicit boxes")
     major.sort(key=lambda item: (item["bbox"][1] + item["bbox"][3]) / 2)
     ordered = []
-    for row in range(rows):
-        ordered.extend(sorted(major[row * cols:(row + 1) * cols], key=lambda item: (item["bbox"][0] + item["bbox"][2]) / 2))
+    if rows is not None:
+        for row in range(rows):
+            ordered.extend(sorted(major[row * cols:(row + 1) * cols], key=lambda item: (item["bbox"][0] + item["bbox"][2]) / 2))
+    else:
+        # Without an authored layout, group figures whose vertical bounds overlap
+        # by at least half the smaller figure, then order each row horizontally.
+        visual_rows = []
+        for item in major:
+            y0, y1 = item["bbox"][1], item["bbox"][3]
+            for row in visual_rows:
+                ry0, ry1 = row[0]["bbox"][1], row[0]["bbox"][3]
+                if min(y1, ry1) - max(y0, ry0) >= min(y1 - y0, ry1 - ry0) * 0.5:
+                    row.append(item)
+                    break
+            else:
+                visual_rows.append([item])
+        for row in visual_rows:
+            ordered.extend(sorted(row, key=lambda item: item["bbox"][0]))
     groups = [[item] for item in ordered]
     for item in minor:
         target = min(range(len(ordered)), key=lambda i: distance(item["bbox"], ordered[i]["bbox"]))
@@ -81,10 +103,12 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
 
 
 def cut_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image], list[tuple]]:
-    method = spec.get("method", "grid")
+    method = spec.get("method", "components")
     if method == "components":
         return component_frames(source, spec)
-    if method == "grid":
+    if method == "image":
+        boxes = [(0, 0, source.width, source.height)]
+    elif method == "grid":
         cols = integer(spec["cols"], "extract.cols", 1)
         rows = integer(spec["rows"], "extract.rows", 1)
         if cols > source.width or rows > source.height:
@@ -107,15 +131,13 @@ def cut_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image], list
     return [source.crop(box) for box in boxes], boxes
 
 
-def extract_action(cfg: Config, name: str) -> int:
-    spec = cfg.action(name).get("extract")
-    if spec is None:
-        return 0  # Already-separated frames may be supplied directly to process.
-    source_path = inside(cfg.source, spec["file"])
+def extract_source(cfg: Config, filename: str) -> int:
+    spec = cfg.source_spec(filename)["extract"]
+    source_path = inside(cfg.source, filename)
     frames, boxes = cut_frames(read_image(source_path), spec)
     files = {f"{i:03d}.png": frame for i, frame in enumerate(frames)}
-    replace_frames(cfg.directory("source_sprites") / name, files, owned=r"\d+\.png", metadata={
-        "stage": "extract", "source": spec["file"], "files": list(files),
+    replace_frames(inside(cfg.directory("source_sprites"), cfg.source_id(filename)), files, owned=r"\d+\.png", metadata={
+        "stage": "extract", "source": filename, "files": list(files),
         "frames": [{"file": filename, "source_box": box} for filename, box in zip(files, boxes)],
     })
     return len(frames)

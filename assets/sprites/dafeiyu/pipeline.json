@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "character": "dafeiyu",
   "frame_size": [
     640,
@@ -46,154 +46,31 @@
       "columns": 4
     }
   },
-  "actions": {
-    "idle": {
-      "fps": 8,
-      "loop": true,
+  "sources": {
+    "attack.png": {
       "extract": {
-        "file": "idle.png",
+        "cols": 3,
+        "rows": 2
+      }
+    },
+    "attack_special.png": {
+      "extract": {
         "cols": 4,
         "rows": 2
       },
-      "sprites": [
-        "idle/000.png",
-        "idle/001.png",
-        "idle/002.png",
-        "idle/003.png",
-        "idle/004.png",
-        "idle/005.png",
-        "idle/006.png",
-        "idle/007.png"
-      ]
-    },
-    "run": {
-      "fps": 12,
-      "loop": true,
-      "extract": {
-        "file": "run.png",
-        "cols": 4,
-        "rows": 2
-      },
-      "sprites": [
-        "run/000.png",
-        "run/001.png",
-        "run/002.png",
-        "run/003.png",
-        "run/004.png",
-        "run/005.png",
-        "run/006.png",
-        "run/007.png"
-      ]
-    },
-    "jump": {
-      "fps": 12,
-      "loop": false,
-      "extract": {
-        "file": "jump.png",
-        "cols": 3,
-        "rows": 2
-      },
       "process": {
-        "overrides": {
-          "000": {
-            "offset": [
-              0,
-              -50
-            ]
-          }
-        }
-      },
-      "sprites": [
-        "jump/000.png",
-        "jump/001.png",
-        "jump/002.png",
-        "jump/003.png",
-        "jump/004.png",
-        "jump/005.png"
-      ]
+        "fit_height": null,
+        "scale": 1.05
+      }
     },
-    "land": {
-      "fps": 14,
-      "loop": false,
+    "dash.png": {
       "extract": {
-        "file": "land.png",
         "cols": 3,
         "rows": 2
-      },
-      "process": {
-        "overrides": {
-          "000": {
-            "offset": [
-              0,
-              -50
-            ]
-          }
-        }
-      },
-      "sprites": [
-        "land/000.png",
-        "land/001.png",
-        "land/002.png",
-        "land/003.png",
-        "land/004.png",
-        "land/005.png"
-      ]
+      }
     },
-    "dash": {
-      "fps": 16,
-      "loop": false,
+    "die.png": {
       "extract": {
-        "file": "dash.png",
-        "cols": 3,
-        "rows": 2
-      },
-      "sprites": [
-        "dash/000.png",
-        "dash/001.png",
-        "dash/002.png",
-        "dash/003.png",
-        "dash/004.png",
-        "dash/005.png"
-      ]
-    },
-    "attack": {
-      "fps": 14,
-      "loop": false,
-      "extract": {
-        "file": "attack.png",
-        "cols": 3,
-        "rows": 2
-      },
-      "sprites": [
-        "attack/000.png",
-        "attack/001.png",
-        "attack/002.png",
-        "attack/003.png",
-        "attack/004.png",
-        "attack/005.png"
-      ]
-    },
-    "hurt": {
-      "fps": 12,
-      "loop": false,
-      "extract": {
-        "file": "hurt.png",
-        "cols": 5,
-        "rows": 1
-      },
-      "sprites": [
-        "hurt/000.png",
-        "hurt/001.png",
-        "hurt/002.png",
-        "hurt/003.png",
-        "hurt/004.png"
-      ]
-    },
-    "die": {
-      "fps": 10,
-      "loop": false,
-      "extract": {
-        "file": "die.png",
         "cols": 6,
         "rows": 1,
         "split_widest": {
@@ -221,7 +98,174 @@
             ]
           }
         }
+      }
+    },
+    "die_reveal.png": {
+      "extract": {
+        "cols": 5,
+        "rows": 1
       },
+      "process": {
+        "offset": [
+          0,
+          24
+        ]
+      }
+    },
+    "eat_rice.png": {
+      "extract": {
+        "cols": 4,
+        "rows": 2
+      }
+    },
+    "eat_rice_middle.png": {
+      "extract": {
+        "cols": 3,
+        "rows": 2
+      }
+    },
+    "hurt.png": {
+      "extract": {
+        "cols": 5,
+        "rows": 1
+      }
+    },
+    "idle.png": {
+      "extract": {
+        "cols": 4,
+        "rows": 2
+      }
+    },
+    "jump.png": {
+      "extract": {
+        "cols": 3,
+        "rows": 2
+      },
+      "process": {
+        "overrides": {
+          "000": {
+            "offset": [
+              0,
+              -50
+            ]
+          }
+        }
+      }
+    },
+    "land.png": {
+      "extract": {
+        "cols": 3,
+        "rows": 2
+      },
+      "process": {
+        "overrides": {
+          "000": {
+            "offset": [
+              0,
+              -50
+            ]
+          }
+        }
+      }
+    },
+    "run.png": {
+      "extract": {
+        "cols": 4,
+        "rows": 2
+      }
+    }
+  },
+  "actions": {
+    "idle": {
+      "fps": 8,
+      "loop": true,
+      "sprites": [
+        "idle/000.png",
+        "idle/001.png",
+        "idle/002.png",
+        "idle/003.png",
+        "idle/004.png",
+        "idle/005.png",
+        "idle/006.png",
+        "idle/007.png"
+      ]
+    },
+    "run": {
+      "fps": 12,
+      "loop": true,
+      "sprites": [
+        "run/000.png",
+        "run/001.png",
+        "run/002.png",
+        "run/003.png",
+        "run/004.png",
+        "run/005.png",
+        "run/006.png",
+        "run/007.png"
+      ]
+    },
+    "jump": {
+      "fps": 12,
+      "loop": false,
+      "sprites": [
+        "jump/000.png",
+        "jump/001.png",
+        "jump/002.png",
+        "jump/003.png",
+        "jump/004.png",
+        "jump/005.png"
+      ]
+    },
+    "land": {
+      "fps": 14,
+      "loop": false,
+      "sprites": [
+        "land/000.png",
+        "land/001.png",
+        "land/002.png",
+        "land/003.png",
+        "land/004.png",
+        "land/005.png"
+      ]
+    },
+    "dash": {
+      "fps": 16,
+      "loop": false,
+      "sprites": [
+        "dash/000.png",
+        "dash/001.png",
+        "dash/002.png",
+        "dash/003.png",
+        "dash/004.png",
+        "dash/005.png"
+      ]
+    },
+    "attack": {
+      "fps": 14,
+      "loop": false,
+      "sprites": [
+        "attack/000.png",
+        "attack/001.png",
+        "attack/002.png",
+        "attack/003.png",
+        "attack/004.png",
+        "attack/005.png"
+      ]
+    },
+    "hurt": {
+      "fps": 12,
+      "loop": false,
+      "sprites": [
+        "hurt/000.png",
+        "hurt/001.png",
+        "hurt/002.png",
+        "hurt/003.png",
+        "hurt/004.png"
+      ]
+    },
+    "die": {
+      "fps": 10,
+      "loop": false,
       "sprites": [
         "die/000.png",
         "die/002.png",
@@ -253,22 +297,8 @@
     "die_reveal": {
       "fps": 10,
       "loop": false,
-      "extract": {
-        "file": "die_reveal.png",
-        "cols": 5,
-        "rows": 1
-      },
-      "process": {
-        "offset": [
-          0,
-          24
-        ]
-      },
-      "imports": {
-        "start_00": "die_05_start.png"
-      },
       "sprites": [
-        "die_reveal/start_00.png",
+        "die/004.png",
         "die_reveal/000.png",
         "die_reveal/001.png",
         "die_reveal/002.png",
@@ -279,48 +309,25 @@
     "eat_rice": {
       "fps": 6,
       "loop": false,
-      "extract": {
-        "file": "eat_rice_middle.png",
-        "cols": 3,
-        "rows": 2
-      },
-      "imports": {
-        "start_00": "eat_rice_00_start.png",
-        "start_01": "eat_rice_01_start.png",
-        "start_02": "eat_rice_02_start.png",
-        "start_03": "eat_rice_03_start.png",
-        "end_00": "eat_rice_07_end.png",
-        "end_01": "eat_rice_08_end.png",
-        "end_02": "eat_rice_09_end.png"
-      },
       "sprites": [
-        "eat_rice/start_00.png",
-        "eat_rice/start_01.png",
-        "eat_rice/start_02.png",
-        "eat_rice/start_03.png",
+        "idle/000.png",
         "eat_rice/000.png",
         "eat_rice/001.png",
         "eat_rice/002.png",
-        "eat_rice/003.png",
-        "eat_rice/004.png",
-        "eat_rice/005.png",
-        "eat_rice/end_00.png",
-        "eat_rice/end_01.png",
-        "eat_rice/end_02.png"
+        "eat_rice_middle/000.png",
+        "eat_rice_middle/001.png",
+        "eat_rice_middle/002.png",
+        "eat_rice_middle/003.png",
+        "eat_rice_middle/004.png",
+        "eat_rice_middle/005.png",
+        "eat_rice/006.png",
+        "eat_rice/007.png",
+        "idle/000.png"
       ]
     },
     "attack_special": {
       "fps": 12,
       "loop": false,
-      "extract": {
-        "file": "attack_special.png",
-        "cols": 4,
-        "rows": 2
-      },
-      "process": {
-        "fit_height": null,
-        "scale": 1.05
-      },
       "sprites": [
         "attack_special/000.png",
         "attack_special/001.png",

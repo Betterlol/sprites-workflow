@@ -1,0 +1,47 @@
+{
+  "stage": "select",
+  "files": [
+    "run_00.png",
+    "run_01.png",
+    "run_02.png",
+    "run_03.png",
+    "run_04.png",
+    "run_05.png",
+    "run_06.png",
+    "run_07.png"
+  ],
+  "frames": [
+    {
+      "filename": "run_00.png",
+      "processed_sprite": "run/000.png"
+    },
+    {
+      "filename": "run_01.png",
+      "processed_sprite": "run/001.png"
+    },
+    {
+      "filename": "run_02.png",
+      "processed_sprite": "run/002.png"
+    },
+    {
+      "filename": "run_03.png",
+      "processed_sprite": "run/003.png"
+    },
+    {
+      "filename": "run_04.png",
+      "processed_sprite": "run/004.png"
+    },
+    {
+      "filename": "run_05.png",
+      "processed_sprite": "run/005.png"
+    },
+    {
+      "filename": "run_06.png",
+      "processed_sprite": "run/006.png"
+    },
+    {
+      "filename": "run_07.png",
+      "processed_sprite": "run/007.png"
+    }
+  ]
+}

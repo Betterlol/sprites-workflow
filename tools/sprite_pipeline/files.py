@@ -27,10 +27,10 @@ def write_json(path: Path, payload: dict) -> None:
 
 
 def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, owned: str, metadata: dict) -> None:
-    """Render/validate everything before replacing owned PNGs for one action.
+    """Render/validate everything before replacing owned PNGs for one item.
 
     Extra review notes and images with unrelated names are left alone. This is
-    stage-local replacement, not a transaction across all actions or stages.
+    stage-local replacement, not a transaction across all sources/actions.
     """
     directory.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".sprite-frames-", dir=directory.parent) as temporary:
