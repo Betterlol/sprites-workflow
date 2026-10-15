@@ -1,4 +1,7 @@
 ## Agent 生成 spritesheets 的工作流搭建
+
+已实现的阶段划分、目录映射、配置格式和使用命令见 [Sprites 资源流水线](docs/sprite-workflow.md)。
+
 1. source/ -> source_sprites/
 > 将 sprites 从 source 切出来，统一脚本，尽量不做缩放/移位等操作。
 2. source_sprites/ -> porcessed_sprites/ -> sprites/
