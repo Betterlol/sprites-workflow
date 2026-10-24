@@ -111,6 +111,15 @@ class Config:
 def load_config(path: Path, output_root: Path | None = None) -> Config:
     path = path.resolve()
     data = json.loads(path.read_text(encoding="utf-8"))
+    return config_from_data(data, path, output_root)
+
+
+def config_from_data(data: dict, path: Path, output_root: Path | None = None) -> Config:
+    """Validate an independent, in-memory draft without touching project files."""
+    path = path.resolve()
+    if not isinstance(data, dict):
+        raise ValueError("Project configuration must be an object")
+    data = copy.deepcopy(data)
     if data.get("version") != 2:
         raise ValueError("Unsupported pipeline config version; expected 2 with separate sources and actions")
     if not NAME.fullmatch(data.get("character", "")):
@@ -161,12 +170,36 @@ def load_config(path: Path, output_root: Path | None = None) -> Config:
                 raise ValueError(f"{field} rules must be objects; every source goes through extraction and processing")
         if {"imports", "inputs"} & set(settings.get("process", {})) or "file" in settings.get("extract", {}):
             raise ValueError("Source files are discovered automatically; imports/inputs/extract.file are no longer supported")
+        overrides = settings.get("process", {}).get("overrides", {})
+        if not isinstance(overrides, dict) or any(not isinstance(value, dict) for value in overrides.values()):
+            raise ValueError("process.overrides must map sprite IDs to processing objects")
+        split = settings.get("extract", {}).get("split_widest")
+        if split is not None and not isinstance(split, dict):
+            raise ValueError("extract.split_widest must be an object")
+        identities = settings.get("extract", {}).get("identities", [])
+        if not isinstance(identities, list):
+            raise ValueError("extract.identities must be an array")
+        filenames = set()
+        for item in identities:
+            if not isinstance(item, dict) or not re.fullmatch(r"\d+\.png", item.get("file", "")):
+                raise ValueError("extract.identities entries need a numeric PNG file and source_box")
+            box = item.get("source_box")
+            if not isinstance(box, (list, tuple)) or len(box) != 4:
+                raise ValueError("extract.identities source_box must have four coordinates")
+            for value in box:
+                integer(value, "extract.identities source_box")
+            if box[0] >= box[2] or box[1] >= box[3] or item["file"] in filenames:
+                raise ValueError("extract.identities needs unique IDs and nonempty rectangles")
+            filenames.add(item["file"])
     for name in data["actions"]:
         if not NAME.fullmatch(name):
             raise ValueError(f"Invalid action name: {name!r}")
         if not isinstance(data["actions"][name], dict):
             raise ValueError(f"{name}: action configuration must be an object")
         spec = cfg.action(name)
+        for field in ("pack", "animation"):
+            if field in spec and not isinstance(spec[field], dict):
+                raise ValueError(f"{name}.{field} must be an object")
         if {"extract", "process", "imports"} & set(data["actions"][name]):
             raise ValueError(f"{name}: actions only assemble processed sprites; put extraction/processing rules in sources")
         fps = positive(spec.get("fps", 12), f"{name}.fps")

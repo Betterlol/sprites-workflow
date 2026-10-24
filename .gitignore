@@ -1,3 +1,5 @@
 __pycache__/
 **/source_sprites/
-**/processed_sprites/
+**/processed_sprites/*
+!**/processed_sprites/_approved/
+!**/processed_sprites/imports/

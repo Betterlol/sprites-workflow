@@ -2,12 +2,62 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 
 from .config import Config, inside, integer
 from .files import read_image, replace_frames
+
+
+def preserve_slice_ids(boxes: list[tuple], previous: list[dict]) -> list[str]:
+    """Match old region identities before assigning fresh IDs to new regions."""
+    old = {Path(item["file"]).stem: tuple(item["source_box"]) for item in previous
+           if isinstance(item, dict) and "file" in item and "source_box" in item}
+    used = set()
+    result = [None] * len(boxes)
+    next_id = max([int(key) for key in old if key.isdigit()] + [-1]) + 1
+    for i, box in enumerate(boxes):
+        matches = [key for key, previous_box in old.items() if previous_box == tuple(box) and key not in used]
+        if len(matches) == 1:
+            result[i] = matches[0]
+            used.add(matches[0])
+    for i, (x0, y0, x1, y1) in enumerate(boxes):
+        if result[i] is not None:
+            continue
+        candidates = []
+        for key, (a0, b0, a1, b1) in old.items():
+            if key in used:
+                continue
+            intersection = max(0, min(x1, a1) - max(x0, a0)) * max(0, min(y1, b1) - max(y0, b0))
+            union = (x1 - x0) * (y1 - y0) + (a1 - a0) * (b1 - b0) - intersection
+            if union and intersection / union > .5:
+                candidates.append(key)
+        if len(candidates) == 1:
+            key = candidates[0]
+        else:
+            key = f"{next_id:03d}"
+            next_id += 1
+        result[i] = key
+        used.add(key)
+    return result
+
+
+def previous_slices(cfg: Config, filename: str) -> list[dict]:
+    authored = cfg.source_spec(filename)["extract"].get("identities")
+    if authored:
+        return authored
+    # Older projects fall back to stage inventories until the first GUI apply.
+    for stage in ("processed_sprites", "source_sprites"):
+        inventory = inside(cfg.directory(stage), cfg.source_id(filename)) / "_stage.json"
+        if inventory.exists():
+            payload = json.loads(inventory.read_text(encoding="utf-8"))
+            if payload.get("source") == filename and payload.get("frames"):
+                return payload["frames"]
+    return []
 
 
 def bbox(mask: np.ndarray) -> tuple[int, int, int, int]:
@@ -135,7 +185,8 @@ def extract_source(cfg: Config, filename: str) -> int:
     spec = cfg.source_spec(filename)["extract"]
     source_path = inside(cfg.source, filename)
     frames, boxes = cut_frames(read_image(source_path), spec)
-    files = {f"{i:03d}.png": frame for i, frame in enumerate(frames)}
+    keys = preserve_slice_ids(boxes, previous_slices(cfg, filename))
+    files = {f"{key}.png": frame for key, frame in zip(keys, frames)}
     replace_frames(inside(cfg.directory("source_sprites"), cfg.source_id(filename)), files, owned=r"\d+\.png", metadata={
         "stage": "extract", "source": filename, "files": list(files),
         "frames": [{"file": filename, "source_box": box} for filename, box in zip(files, boxes)],

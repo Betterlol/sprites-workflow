@@ -1,5 +1,20 @@
 ## Agent 生成 spritesheets 的工作流搭建
 
+### 本地网页工作台
+
+现有 CLI 继续保留，新增 `tools/serve_sprites.py` 启动同源的本地 FastAPI 服务与浏览器界面。前端使用原生 ES modules 和 Canvas 2D，无前端构建依赖。
+
+网页工作流为：原图 → 内存切图 / 参数预览 → 明确应用到 processed → 动作引用与 Review 编排 → 按需导出。
+
+- `pipeline.json` 仍是可由人、Agent、CLI 共同使用的工程配置。网页只在显式保存、应用、导入或迁移时回写；使用文件摘要检测其他窗口或命令行的修改。
+- 动作复用 `actions.*.sprites`，不会持久化复制一套最终帧。游戏顺序 / FPS 与 `animation` 展示顺序 / 逐步时长独立。
+- Review 保存在 `workbench.reviews`，引用动作、片段范围和重复次数；片段重复显式有界，不继承动作的无限循环。
+- 预览与 CLI 共用切图和处理函数；导出复用原有打包器，但仅在临时目录生成文件。
+- 已有最终帧可以迁移到 `processed_sprites/_approved/` 并更新引用，保留手工修图。`imports/` 保存外部导入的单帧。
+- 自动匹配切图区域的旧 ID；新增区域分配新 ID。若切图移除仍被引用的素材，应用失败且不改动原结果。
+
+操作和接口说明见 [工作台说明](docs/workbench.md)。
+
 已实现的阶段划分、目录映射、配置格式和使用命令见 [Sprites 资源流水线](docs/sprite-workflow.md)。
 
 1. source/ -> source_sprites/

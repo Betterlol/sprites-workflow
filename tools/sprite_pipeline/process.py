@@ -69,7 +69,6 @@ def normalize(image: Image.Image, cfg: Config, settings: dict, scale: float) -> 
 
 
 def process_source(cfg: Config, filename: str) -> int:
-    settings = cfg.source_spec(filename)["process"]
     directory = inside(cfg.directory("source_sprites"), cfg.source_id(filename))
     inventory = json.loads((directory / "_stage.json").read_text(encoding="utf-8"))
     if inventory.get("stage") != "extract" or inventory.get("source") != filename:
@@ -79,6 +78,20 @@ def process_source(cfg: Config, filename: str) -> int:
     if not sources:
         raise ValueError(f"{filename}: no extracted frames found; run extract")
     images = {key: read_image(path) for key, path in sources.items()}
+    frames, scale = process_images(cfg, filename, images)
+    replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames, owned=r"\d+\.png", metadata={
+        "stage": "process", "source": filename, "scale": scale, "files": list(frames),
+        "frames": inventory.get("frames", []),
+        "inputs": {key: path.relative_to(cfg.directory("source_sprites")).as_posix() for key, path in sources.items()},
+    })
+    return len(frames)
+
+
+def process_images(cfg: Config, filename: str, images: dict[str, Image.Image]) -> tuple[dict[str, Image.Image], float]:
+    """Shared renderer for CLI stages and unsaved workbench previews."""
+    if not images:
+        raise ValueError("No extracted frames to process")
+    settings = cfg.source_spec(filename)["process"]
     scale = positive(settings.get("scale", 1.0), f"{filename}.process.scale")
     if settings.get("fit_height") is not None and images:
         target = positive(settings["fit_height"], "process.fit_height")
@@ -101,8 +114,4 @@ def process_source(cfg: Config, filename: str) -> int:
         if "scale" in overrides.get(key, {}):
             options["scale"] = overrides[key]["scale"]
         frames[f"{key}.png"] = normalize(image, cfg, options, scale)
-    replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames, owned=r"\d+\.png", metadata={
-        "stage": "process", "source": filename, "scale": scale, "files": list(frames),
-        "inputs": {key: path.relative_to(cfg.directory("source_sprites")).as_posix() for key, path in sources.items()},
-    })
-    return len(frames)
+    return frames, scale

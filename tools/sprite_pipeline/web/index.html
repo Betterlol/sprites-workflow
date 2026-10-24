@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121419">
+  <title>Sprite Workbench · 动作工作台</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Sprite Workbench 首页"><span class="brand-mark">S<span>·</span></span><span>SPRITE<span class="brand-sub">WORKBENCH</span></span></a>
+    <div class="project-label"><span class="status-dot"></span><span id="project-name">正在打开工程…</span><span class="local-tag">LOCAL</span></div>
+    <div class="top-actions">
+      <button id="undo" class="icon-button" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
+      <button id="redo" class="icon-button" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button>
+      <button id="reload" class="subtle">重新载入</button>
+      <button id="save">保存工程 <kbd>Ctrl S</kbd></button>
+      <button id="export-open" class="primary">导出资源 <span>↗</span></button>
+    </div>
+  </header>
+
+  <nav class="modebar" aria-label="工作模式">
+    <div class="mode-tabs" role="tablist">
+      <button data-mode="source" role="tab" aria-selected="false"><span>01</span> 素材处理</button>
+      <button data-mode="action" role="tab" aria-selected="true" class="active"><span>02</span> 动作编排</button>
+      <button data-mode="review" role="tab" aria-selected="false"><span>03</span> 衔接 Review</button>
+    </div>
+    <span id="save-status" class="save-status" role="status">工程载入中</span>
+  </nav>
+
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div>
+      <div id="item-list" class="item-list"></div>
+      <div class="library-heading"><h2>素材库 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
+      <div class="library-filters"><input id="asset-search" type="search" placeholder="搜索素材…" aria-label="搜索素材"><select id="asset-source" aria-label="筛选素材来源"><option value="">全部来源</option></select></div>
+      <div id="asset-library" class="asset-library"></div>
+      <div class="sidebar-footer"><button id="prepare" title="只生成缺失的 processed 素材，不覆盖现有图片">准备缺失素材</button><button id="migrate" title="将现有最终帧保留为可复用素材，并更新动作引用">保留已有最终帧</button></div>
+    </aside>
+
+    <section class="editor">
+      <div class="canvas-toolbar"><div><span class="eyebrow" id="editor-kind">ACTION EDITOR</span><strong id="editor-title">—</strong></div><div class="view-controls"><label><input id="guides" type="checkbox" checked> 辅助线</label><label><input id="onion" type="checkbox"> 前帧叠图</label><label><input id="reference" type="checkbox"> Idle 参考</label><select id="background" aria-label="画布背景"><option value="checker">棋盘格</option><option value="dark">深色</option><option value="light">浅色</option></select><select id="zoom" aria-label="画布缩放"><option value="fit">适应画布</option><option value="1">100%</option><option value="0.5">50%</option><option value="2">200%</option></select></div></div>
+      <div id="canvas-area" class="canvas-area">
+        <span class="canvas-label" id="canvas-label">统一画布 · 固定锚点</span>
+        <canvas id="stage" width="640" height="640" aria-label="Sprite 预览画布"></canvas>
+        <div id="empty-canvas" class="empty-canvas" hidden><span>＋</span><strong>从素材开始，编排动作</strong><p>点击左侧素材，或将它拖入下方时间轴</p></div>
+        <div id="frame-info" class="frame-info">—</div>
+        <div id="canvas-loading" class="canvas-loading" hidden>正在处理…</div>
+      </div>
+      <div class="transport"><div class="transport-left"><button id="previous" class="icon-button" title="上一帧 ←" aria-label="上一帧">Ⅰ‹</button><button id="play" class="play-button" title="播放 / 暂停 Space" aria-label="播放">▶</button><button id="next" class="icon-button" title="下一帧 →" aria-label="下一帧">›Ⅰ</button><span id="play-position" class="mono">000 / 000</span></div><div class="transport-right"><label class="compact-label">速度 <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label><input id="loop-preview" type="checkbox" checked> 循环预览</label><span id="total-time" class="mono">0.00s</span></div></div>
+      <div class="timeline-heading"><h2 id="timeline-title">帧时间轴</h2><div id="timeline-tools"></div></div>
+      <div id="timeline" class="timeline" aria-label="帧时间轴"></div>
+      <div class="timeline-footer"><span id="timeline-help">拖拽排序 · 点击素材添加 · Delete 移除所选帧</span><span id="timeline-stats" class="mono">0 FRAMES</span></div>
+    </section>
+
+    <aside class="inspector"><div class="panel-heading"><h2>属性检查器</h2><span class="eyebrow">INSPECTOR</span></div><div id="inspector-content"></div></aside>
+  </main>
+
+  <footer class="statusbar"><span id="status-message" role="status">所有素材保存在本机 · 导出时生成文件</span><span>← → 单步 <span class="divider">/</span> Space 播放 <span class="divider">/</span> Ctrl S 保存</span></footer>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="export-dialog">
+    <form id="export-form"><div class="dialog-heading"><div><span class="eyebrow">EXPORT</span><h2>导出资源</h2></div><button type="button" id="export-close" class="icon-button" aria-label="关闭导出">×</button></div>
+      <p class="muted">根据当前草稿生成。不会覆盖工程中的已有导出文件。</p>
+      <label class="field">导出格式<select id="export-format"><option value="all">完整动作资源 · 帧 + 图集 + WebP</option><option value="frames">PNG 帧序列 ZIP</option><option value="atlas">PNG 图集 + TexturePacker JSON</option><option value="webp">展示动画 WebP</option><option value="review">当前 Review · WebP + 播放记录</option><option value="project">完整工程 · 原图 + processed + 配置</option></select></label>
+      <fieldset id="export-actions"><legend>选择动作</legend><div id="export-action-list"></div></fieldset>
+      <p id="export-note" class="hint">图集使用游戏帧顺序；WebP 使用独立的展示播放配置。</p>
+      <button type="submit" class="primary wide" id="export-submit">生成并下载 ZIP ↗</button>
+    </form>
+  </dialog>
+  <input type="file" id="source-upload" accept="image/*" hidden>
+  <input type="file" id="processed-upload" accept="image/png" hidden>
+</body>
+</html>
