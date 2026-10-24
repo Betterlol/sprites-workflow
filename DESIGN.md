@@ -12,7 +12,10 @@
 > 将 sprites 进行打包，生成 spritesheets/ 和 webp/，spritesheets/ 用于游戏运行，webp/ 用于网页展示。
 > 生成 webp/ 需要支持配置 animation，即配置每帧持续时间，帧的执行顺序等，最终生成 webp/ 的动画效果。（仅供展示使用，而非游戏运行使用）
 
-## 工作流开始 prompt
+## 工作历史记录
+
+### 初始化工作流
+
 为 2d 动作类游戏提供动作资源：参考 <空洞骑士> 动作模版 [HollowKnight](HollowKnight/Knight) 和 <大肥鱼> 角色人设图 [dafeiyu-game-identity.png](asserts/refer/dafeiyu-game-identity.png) （提示：生成完 idle 动作之后，也可以额外提供 idle 作为参考），生成可以 <大肥鱼> 的高清晰度的 sprites。
 <大肥鱼> 的动作至少包括以下：
 - idle（站立） 
