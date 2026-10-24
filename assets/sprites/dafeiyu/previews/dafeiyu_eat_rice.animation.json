@@ -1,0 +1,59 @@
+{
+  "schema": "sprite-preview-v1",
+  "action": "eat_rice",
+  "loop": 1,
+  "steps": [
+    {
+      "frame": "eat_rice_00.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_01.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_02.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_03.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_04.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_05.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_06.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_07.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_08.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_09.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_10.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_11.png",
+      "duration_ms": 167
+    },
+    {
+      "frame": "eat_rice_12.png",
+      "duration_ms": 167
+    }
+  ]
+}
