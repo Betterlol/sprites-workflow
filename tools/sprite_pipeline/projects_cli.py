@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .config import load_config
 from .projects import DEFAULT_WORKSPACES, ProjectStore
-from .workbench import validate_editor
+from .workbench import ConflictError, validate_editor
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,20 +25,23 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("--anchor-x", type=float, default=.5)
     create.add_argument("--anchor-y", type=float, default=.9)
     commands.add_parser("list")
-    for name in ("status", "validate", "apply", "prepare", "save", "import", "export"):
+    for name in ("status", "validate", "apply", "prepare", "save", "import", "delete", "export"):
         command = commands.add_parser(name)
         command.add_argument("project")
         if name == "apply":
             command.add_argument("--source", required=True)
-        if name in {"apply", "prepare", "import"}:
+        if name in {"apply", "prepare", "import", "delete"}:
             command.add_argument("--revision", help="Expected config revision, if already inspected")
             command.add_argument("--asset-revision", help="Expected material revision, if already inspected")
         if name == "save":
             command.add_argument("--data", type=Path, required=True, help="Draft pipeline.json")
             command.add_argument("--revision", required=True, help="Revision returned by status")
         if name == "import":
-            command.add_argument("--kind", choices=("source", "processed"), required=True)
-            command.add_argument("--file", type=Path, required=True)
+            command.add_argument("--kind", choices=("source", "processed", "reference"), required=True)
+            command.add_argument("--file", type=Path, action="append", required=True, help="Repeat to import multiple images")
+        if name == "delete":
+            command.add_argument("--kind", choices=("source", "processed", "reference"), required=True)
+            command.add_argument("--ref", action="append", required=True, dest="references", help="Repeat to delete a batch; in-use sprites are protected")
         if name == "export":
             command.add_argument("--format", choices=("project", "frames", "atlas", "webp", "all"), default="project")
             command.add_argument("--action", action="append", dest="actions")
@@ -80,8 +83,23 @@ def main(argv: list[str] | None = None) -> int:
                         result = project.apply(cfg.data, revision, args.source, assets)
                     elif args.command == "prepare":
                         result = project.prepare(cfg.data, revision, assets)
+                    elif args.command == "delete":
+                        result = project.delete(args.kind, args.references, cfg.data, revision, assets)
                     else:
-                        result = project.upload(args.kind, args.file.name, args.file.read_bytes(), cfg.data, revision, assets)
+                        result = project.state()
+                        imported, failed, skipped = [], [], []
+                        for index, path in enumerate(args.file):
+                            try:
+                                result = project.upload(args.kind, path.name, path.read_bytes(), result["data"], revision, assets)
+                                imported.append(path.name)
+                                revision, assets = result["revision"], result["asset_revision"]
+                            except (ValueError, OSError, KeyError, TypeError) as error:
+                                failed.append({"file": path.name, "error": str(error)})
+                                if isinstance(error, ConflictError):
+                                    skipped = [str(p) for p in args.file[index + 1:]]
+                                    break
+                        result = {**result, "imported": imported, "failed": failed, "skipped": skipped}
+                        valid = not failed
         print(json.dumps(result, ensure_ascii=False, indent=None if args.json else 2))
         return 0 if valid else 1
     except (ValueError, OSError, KeyError, TypeError) as error:

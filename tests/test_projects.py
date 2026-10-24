@@ -13,6 +13,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -21,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from sprite_pipeline.cli import main as build
 from sprite_pipeline.config import load_config
 from sprite_pipeline.files import write_json
+from sprite_pipeline.extract import extract_source
 from sprite_pipeline.locking import project_lock
 from sprite_pipeline.projects import ProjectStore
 from sprite_pipeline.projects_cli import main as manage
@@ -70,7 +72,7 @@ class ProjectWorkflowTests(unittest.TestCase):
         self.assertEqual(snapshot["sources"], [])
         self.assertEqual(snapshot["assets"], [])
         self.assertEqual(snapshot["project"]["name"], "大肥鱼")
-        for directory in ("source", "source_sprites", "processed_sprites", "reference"):
+        for directory in ("source", "source_sprites", "processed_sprites", "references"):
             self.assertTrue((self.root / "fish" / directory).is_dir())
         response = self.import_image(snapshot)
         self.assertEqual(response.status_code, 200, response.text)
@@ -84,6 +86,7 @@ class ProjectWorkflowTests(unittest.TestCase):
         response = self.import_image(snapshot, kind="processed")
         self.assertEqual(response.status_code, 200, response.text)
         snapshot = response.json()
+        (self.root / "fish/reference").mkdir()
         (self.root / "fish/reference/character.txt").write_text("角色约束", encoding="utf-8")
         snapshot["data"]["actions"] = {"idle": {"sprites": ["imports/pose.png"], "fps": 8}}
         response = self.post("export", snapshot, options={"format": "project"})
@@ -222,6 +225,131 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(listing["initial_project"], "@config")
             self.assertEqual(len(listing["projects"]), 1)
             self.assertEqual(client.get("/api/projects/@config").status_code, 200)
+
+    def test_batch_deletion_protects_used_assets_then_accepts_draft_reference_removal(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed", filename="a.png").json()
+        snapshot = self.import_image(snapshot, kind="processed", filename="b.png").json()
+        snapshot["data"]["actions"] = {"idle": {"sprites": ["imports/a.png"]}}
+        self.assertEqual(self.post("save", snapshot).status_code, 200)
+        snapshot = self.snapshot()
+        before = (self.root / "fish/pipeline.json").read_bytes()
+        response = self.post("delete", snapshot, kind="processed", references=["imports/b.png", "imports/a.png"])
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("idle", response.json()["error"])
+        self.assertEqual(len(self.snapshot()["assets"]), 2)
+        self.assertEqual((self.root / "fish/pipeline.json").read_bytes(), before)
+        snapshot["data"]["actions"]["idle"]["sprites"] = None
+        response = self.post("delete", snapshot, kind="processed", references=["imports/b.png", "imports/a.png"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["deleted"], 2)
+        self.assertEqual(response.json()["assets"], [])
+        self.assertIsNone(self.snapshot()["data"]["actions"]["idle"]["sprites"])
+
+    def test_source_deletion_cleans_derived_directories_and_recipe_but_preserves_other_sources(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, filename="a.png").json()
+        snapshot = self.import_image(snapshot, filename="b.png").json()
+        snapshot = self.post("prepare", snapshot).json()
+        cfg = load_config(self.root / "fish/pipeline.json")
+        extract_source(cfg, "a.png")
+        snapshot["data"]["actions"] = {"idle": {"sprites": ["a/000.png"]}}
+        response = self.post("delete", snapshot, kind="source", references=["a.png"])
+        self.assertEqual(response.status_code, 400, response.text)
+        snapshot["data"]["actions"] = {}
+        response = self.post("delete", snapshot, kind="source", references=["a.png"])
+        self.assertEqual(response.status_code, 200, response.text)
+        for relative in ("source/a.png", "source_sprites/a", "processed_sprites/a"):
+            self.assertFalse((self.root / "fish" / relative).exists())
+        self.assertTrue((self.root / "fish/source/b.png").is_file())
+        self.assertTrue((self.root / "fish/processed_sprites/b/000.png").is_file())
+        self.assertNotIn("a.png", response.json()["data"]["sources"])
+
+    def test_invalid_or_stale_deletion_batch_changes_nothing(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed", filename="a.png").json()
+        for references in (["imports/a.png", "imports/missing.png"], ["../source/a.png"], ["imports/a.png", "imports/A.png"]):
+            response = self.post("delete", snapshot, kind="processed", references=references)
+            self.assertIn(response.status_code, (400, 404), response.text)
+            self.assertTrue((self.root / "fish/processed_sprites/imports/a.png").is_file())
+        snapshot = self.import_image(snapshot, kind="processed", filename="b.png").json()
+        old_revision = snapshot["asset_revision"]
+        snapshot = self.import_image(snapshot, kind="processed", filename="c.png").json()
+        snapshot["asset_revision"] = old_revision
+        response = self.post("delete", snapshot, kind="processed", references=["imports/a.png"])
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(len(self.snapshot()["assets"]), 3)
+
+    def test_delete_rolls_back_pixels_and_stage_metadata_when_config_write_fails(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot).json()
+        snapshot = self.post("prepare", snapshot).json()
+        project = self.store.get("fish")
+        before = {p.relative_to(project.path.parent): p.read_bytes() for p in project.path.parent.rglob("*") if p.is_file()}
+        def failing_write(path, data):
+            if path == project.path:
+                raise OSError("simulated config write failure")
+            write_json(path, data)
+        with patch("sprite_pipeline.workbench.write_json", side_effect=failing_write):
+            with self.assertRaisesRegex(OSError, "simulated"):
+                project.delete("processed", ["pose/000.png"], snapshot["data"], snapshot["revision"], snapshot["asset_revision"])
+        after = {p.relative_to(project.path.parent): p.read_bytes() for p in project.path.parent.rglob("*") if p.is_file()}
+        self.assertEqual(after, before)
+
+    def test_source_deletion_never_treats_a_directory_as_an_image(self):
+        snapshot = self.create()
+        directory = self.root / "fish/source/folder.png"
+        directory.mkdir()
+        Image.new("RGBA", (16, 16), "red").save(directory / "child.png")
+        snapshot = self.snapshot()
+        snapshot["data"]["sources"]["folder.png"] = {}
+        self.assertEqual(self.post("save", snapshot).status_code, 200)
+        response = self.post("delete", self.snapshot(), kind="source", references=["folder.png"])
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertTrue((directory / "child.png").is_file())
+
+    def test_reference_import_view_delete_and_backup_support_both_directory_names(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="reference", filename="identity.png").json()
+        self.assertEqual(snapshot["sources"], [])
+        self.assertEqual(snapshot["assets"], [])
+        self.assertEqual(snapshot["references"][0]["ref"], "references/identity.png")
+        self.assertEqual(self.client.get(snapshot["references"][0]["url"]).status_code, 200)
+        legacy = self.root / "fish/reference"
+        legacy.mkdir()
+        Image.new("RGBA", (50, 70), "blue").save(legacy / "legacy.png")
+        snapshot = self.snapshot()
+        self.assertEqual(len(snapshot["references"]), 2)
+        response = self.post("export", snapshot, options={"format": "project"})
+        self.assertEqual(response.status_code, 200, response.text[:100])
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertIn("references/identity.png", archive.namelist())
+            self.assertIn("reference/legacy.png", archive.namelist())
+        for ref in ("source/pose.png", "references/../pipeline.json", "references/../reference/legacy.png"):
+            self.assertEqual(self.post("delete", snapshot, kind="reference", references=[ref]).status_code, 400)
+        response = self.post("delete", snapshot, kind="reference", references=["reference/legacy.png"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()["references"]), 1)
+        self.assertTrue((self.root / "fish/references/identity.png").is_file())
+
+    def test_cli_batch_import_reports_failures_and_continues_and_cli_delete_is_shared(self):
+        self.create()
+        a, b = self.root.parent / "a.png", self.root.parent / "b.png"
+        Image.new("RGBA", (32, 32), "blue").save(a)
+        Image.new("RGBA", (32, 32), "red").save(b)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = manage(["--workspace-root", str(self.root), "import", "fish", "--kind", "processed",
+                             "--file", str(a), "--file", str(a), "--file", str(b)])
+        self.assertEqual(result, 1)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["imported"], ["a.png", "b.png"])
+        self.assertEqual(len(result["failed"]), 1)
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = manage(["--workspace-root", str(self.root), "delete", "fish", "--kind", "processed",
+                             "--ref", "imports/a.png", "--ref", "imports/b.png"])
+        self.assertEqual(result, 0)
+        self.assertEqual(self.snapshot()["assets"], [])
 
 
 if __name__ == "__main__":

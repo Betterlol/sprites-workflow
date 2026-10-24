@@ -11,7 +11,9 @@ python tools/serve_sprites.py
 
 启动本地服务并打开 **http://127.0.0.1:8765** 的工程列表。点击“新建工程”，输入名称、目录名、画布和锚点，就会在 `workspaces/<目录名>/` 创建独立工程。名称和目录名均支持中文，目录名留空时使用工程名称。前端无需 Node、npm 或构建步骤，素材及工程都留在本机。
 
-- **素材处理**：导入原图、自动连通域 / 网格 / 手动画框切图；调整整组缩放、位置、单帧覆盖，并预览、应用处理结果。
+- **素材处理**：支持多选批量导入原图和 processed；自动连通域 / 网格 / 手动画框切图；调整整组缩放、位置、单帧覆盖，并预览、应用处理结果。
+- **批量编排与删除**：素材库支持多选、Shift 连选、全选当前筛选结果，一次加入动作或删除；原图也可删除，正在被动作引用的素材会受到保护。
+- **参考图**：在独立页签中批量导入、查看和删除，保存于 `references/`，不参与切图。
 - **动作编排**：跨原图拖入 processed 素材，排序、重复、删除、调整 FPS；游戏播放与展示 WebP 的顺序、时长分别编辑。
 - **衔接 Review**：拼接 jump → land → idle 等动作片段，设置次数和范围，配合前帧叠图、Idle 参考及逐帧播放检查衔接。
 - **自由导出**：PNG 帧 ZIP、图集与 TexturePacker JSON、动画 WebP、Review 动画，或包含原图、processed 和配置的完整工程 ZIP。
@@ -42,7 +44,7 @@ source/ → source_sprites/ → processed_sprites/ → sprites/ → spritesheets
 3. **组装**：确认素材后，在配置中选帧和排序；可以跨原图复用素材，脚本自动生成连续编号。
 4. **导出**：最终帧打包为 PNG 图集和 TexturePacker JSON，另生成展示用 WebP。
 
-工程目录约定见 [workspaces/README.md](workspaces/README.md)。每个工程包含自己的配置、`source/`、`source_sprites/`、`processed_sprites/` 和 `reference/`。网页按需导出 ZIP；CLI 的最终帧、图集、WebP 和元数据写入工程的 `exports/`，首次创建不生成这些交付目录。
+工程目录约定见 [workspaces/README.md](workspaces/README.md)。每个工程包含自己的配置、`source/`、`source_sprites/`、`processed_sprites/` 和 `references/`。网页按需导出 ZIP；CLI 的最终帧、图集、WebP 和元数据写入工程的 `exports/`，首次创建不生成这些交付目录。已有 `reference/` 继续兼容读取和备份，不自动搬动。
 
 现有 `assets/` 保持原样，由用户手动整理；工作台不会自动迁移或删除它。
 
@@ -111,7 +113,7 @@ python tools/build_sprites.py extract --config workspaces/my_character/pipeline.
 
 ## Git 提交约定
 
-`source_sprites/`、工程锁、临时文件和工作区工程的 `exports/` 通过 [.gitignore](.gitignore) 忽略。`pipeline.json`、`source/`、`reference/`、工程说明和 `processed_sprites/` 默认保留，应一起提交或备份。
+`source_sprites/`、工程锁、临时文件和工作区工程的 `exports/` 通过 [.gitignore](.gitignore) 忽略。`pipeline.json`、`source/`、`references/`、工程说明和 `processed_sprites/` 默认保留，应一起提交或备份。
 
 **使用网页工作台时，不要随意清空 processed。** 人工修图建议放入 `processed_sprites/imports/` 并修改动作引用，避免“应用处理”覆盖原图对应目录中的修图。
 

@@ -35,16 +35,19 @@
       <button data-mode="source" role="tab" aria-selected="false"><span>01</span> 素材处理</button>
       <button data-mode="action" role="tab" aria-selected="true" class="active"><span>02</span> 动作编排</button>
       <button data-mode="review" role="tab" aria-selected="false"><span>03</span> 衔接 Review</button>
+      <button data-mode="reference" role="tab" aria-selected="false"><span>04</span> 参考图</button>
     </div>
     <span id="save-status" class="save-status" role="status">工程载入中</span>
   </nav>
 
   <main class="workspace">
     <aside class="sidebar">
-      <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div>
+      <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><div class="item-actions"><button id="delete-item" class="text-button danger" hidden>删除</button><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div></div>
       <div id="item-list" class="item-list"></div>
       <div class="library-heading"><h2>素材库 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
       <div class="library-filters"><input id="asset-search" type="search" placeholder="搜索素材…" aria-label="搜索素材"><select id="asset-source" aria-label="筛选素材来源"><option value="">全部来源</option></select></div>
+      <div class="library-selection"><label><input id="asset-multiselect" type="checkbox"> 多选</label><button id="assets-select-visible" class="text-button">全选当前结果</button><button id="assets-clear" class="text-button">清空</button></div>
+      <div id="asset-selection-actions" class="selection-actions" hidden><span id="asset-selection-count">已选 0 张</span><button id="assets-add" class="text-button">加入动作</button><button id="assets-delete" class="text-button danger">删除</button></div>
       <div id="asset-library" class="asset-library"></div>
       <div class="sidebar-footer"><button id="prepare" title="只生成缺失的 processed 素材，不覆盖现有图片">准备缺失素材</button><button id="migrate" title="将现有最终帧保留为可复用素材，并更新动作引用">保留已有最终帧</button></div>
     </aside>
@@ -88,7 +91,8 @@
       <button type="submit" class="primary wide" id="export-submit">生成并下载 ZIP ↗</button>
     </form>
   </dialog>
-  <input type="file" id="source-upload" accept="image/*" hidden>
-  <input type="file" id="processed-upload" accept="image/png" hidden>
+  <input type="file" id="source-upload" accept="image/*" multiple hidden>
+  <input type="file" id="processed-upload" accept="image/png" multiple hidden>
+  <input type="file" id="reference-upload" accept="image/*" multiple hidden>
 </body>
 </html>

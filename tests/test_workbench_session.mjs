@@ -40,7 +40,7 @@ function register(markup) {
 }
 register(html);
 const descendants = new Map();
-const tabs = ['source','action','review'].map(mode => { const tab = new Element(); tab.dataset.mode = mode; return tab; });
+const tabs = ['source','action','review','reference'].map(mode => { const tab = new Element(); tab.dataset.mode = mode; return tab; });
 const body = new Element(); body.classList.add('project-home');
 const document = {
   body, hidden:false, activeElement:{tagName:'BODY'}, addEventListener() {}, createElement:() => new Element(),
@@ -60,13 +60,14 @@ class Player {
   setSteps(steps,index = 0) { this.steps = steps; this.index = index; this.onStep(index); }
 }
 const snapshot = id => ({data:{version:2,project:{name:id},character:id,frame_size:[32,32],anchor:{pixels:[16,29]},defaults:{},sources:{},actions:{},workbench:{reviews:{}}},
-  revision:'r-' + id,asset_revision:'a-' + id,sources:[],assets:[],legacy_count:0,project:{id,name:id,directory:'/workspaces/' + id},warnings:[]});
+  revision:'r-' + id,asset_revision:'a-' + id,sources:[],assets:[],references:[],legacy_count:0,project:{id,name:id,directory:'/workspaces/' + id},warnings:[]});
 const projects = new Map([['alpha',snapshot('alpha')],['beta',snapshot('beta')]]);
 const requests = [];
 let allowDiscard = true;
 let pausedProject = null, resumeSnapshot = null;
 const context = {
   ...model, Player, document, structuredClone, URL, URLSearchParams, Blob,
+  FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,cGl4ZWxz'; queueMicrotask(() => this.onload()); } },
   location:{pathname:'/',search:''}, history:{replaceState() {}},
   window:{addEventListener() {}}, setTimeout:() => 1, clearTimeout() {}, setInterval() {},
   confirm:() => allowDiscard, console,
@@ -80,6 +81,26 @@ const context = {
       const [,id,operation] = url.match(/^\/api\/projects\/([^/]+)(?:\/(\w+))?$/) || [];
       const project = projects.get(decodeURIComponent(id)); assert(project,`Unknown request ${url}`);
       if (operation === 'save') { const payload = JSON.parse(options.body); project.data = structuredClone(payload.data); project.revision += '-saved'; result = {revision:project.revision}; }
+      else if (operation === 'upload') {
+        const payload = JSON.parse(options.body);
+        assert.equal(payload.revision,project.revision,'Batch imports must use the latest config revision');
+        assert.equal(payload.asset_revision,project.asset_revision,'Batch imports must use the latest material revision');
+        if (payload.filename === 'bad.png') return {ok:false,status:400,json:async () => ({error:'invalid test image'})};
+        if (payload.filename === 'conflict.png') return {ok:false,status:409,json:async () => ({error:'external change'})};
+        project.data = structuredClone(payload.data);
+        if (payload.kind === 'processed') project.assets.push({ref:'imports/' + payload.filename,url:'/pixels/' + payload.filename,size:[32,32]});
+        else if (payload.kind === 'reference') project.references.push({ref:'references/' + payload.filename,file:payload.filename,url:'/refs/' + payload.filename,size:[64,48]});
+        else { project.sources.push({file:payload.filename,url:'/sources/' + payload.filename,size:[16,16],count:0}); project.data.sources[payload.filename] = {}; }
+        project.revision += '-import'; project.asset_revision += '-import'; result = project;
+      }
+      else if (operation === 'delete') {
+        const payload = JSON.parse(options.body);
+        if (payload.kind === 'processed' && Object.values(payload.data.actions).some(action => (action.sprites || []).some(ref => payload.references.includes(ref)))) return {ok:false,status:400,json:async () => ({error:'idle still uses these sprites'})};
+        project.data = structuredClone(payload.data);
+        if (payload.kind === 'processed') project.assets = project.assets.filter(a => !payload.references.includes(a.ref));
+        else if (payload.kind === 'reference') project.references = project.references.filter(a => !payload.references.includes(a.ref));
+        project.revision += '-delete'; project.asset_revision += '-delete'; result = {...project,deleted:payload.references.length};
+      }
       else if (operation === 'changes') result = {revision:project.revision,asset_revision:project.asset_revision};
       else {
         assert(!operation,`Unexpected operation ${operation}`);
@@ -92,7 +113,7 @@ const context = {
 };
 let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import.meta.url),'utf8');
 source = source.replace(/^import .*\n/gm,'');
-source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player};';
+source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps};';
 vm.runInNewContext(source,context,{filename:'app.js'});
 const flush = () => new Promise(resolve => setImmediate(resolve));
 await flush();
@@ -144,4 +165,36 @@ elements.get('new-project-name').value = 'new'; elements.get('new-project-id').v
 await elements.get('project-form').onsubmit({preventDefault() {}});
 assert.equal(state.projectId,'new-id'); assert(!elements.get('project-dialog').open);
 assert(!body.classList.contains('project-home')); assert.equal(state.mode,'source');
-console.log('Workbench session: creation, routing, tab isolation and external-change draft protection passed.');
+
+const {mode,uploadFile,selectAsset,deleteMaterials,activeSteps} = context.hooks;
+state.data.actions.idle = {fps:12,sprites:null}; state.action = 'idle'; mode('action');
+const imageFile = name => ({name,size:64});
+const processedInput = elements.get('processed-upload');
+processedInput.files = [imageFile('a.png'),imageFile('bad.png'),imageFile('b.png')];
+await uploadFile(processedInput,'processed');
+assert.equal(state.assets.length,2,elements.get('toast').textContent);
+assert.match(elements.get('toast').textContent,/2\/3/);
+assert.match(elements.get('toast').textContent,/bad.png/);
+selectAsset('imports/a.png'); selectAsset('imports/b.png',{shiftKey:true});
+assert.equal(state.assetSelection.size,2);
+elements.get('assets-add').onclick();
+assert.deepEqual([...state.data.actions.idle.sprites],['imports/a.png','imports/b.png']);
+assert.equal(state.history.length,1,'Adding a selection is one undo operation');
+await deleteMaterials('processed',[...state.assetSelection]);
+assert.equal(state.assets.length,2); assert.match(elements.get('toast').textContent,/idle/);
+state.data.actions.idle.sprites = null;
+await deleteMaterials('processed',[...state.assetSelection]);
+assert.equal(state.assets.length,0); assert.equal(state.assetSelection.size,0);
+
+processedInput.files = [imageFile('conflict.png'),imageFile('skipped.png')];
+await uploadFile(processedInput,'processed');
+assert.equal(state.assets.length,0); assert.match(elements.get('toast').textContent,/未处理 1/);
+const refInput = elements.get('reference-upload');
+refInput.files = [imageFile('identity.png'),imageFile('style.png')];
+await uploadFile(refInput,'reference');
+assert.equal(state.mode,'reference',elements.get('toast').textContent);
+assert.equal(state.references.length,2); assert.equal(state.reference,'references/identity.png');
+assert.equal(activeSteps().length,0); assert.equal(player.sourceView.url,'/refs/identity.png');
+await elements.get('delete-item').onclick();
+assert.equal(state.references.length,1); assert.equal(state.reference,'references/style.png');
+console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');

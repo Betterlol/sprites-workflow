@@ -27,6 +27,8 @@ from .files import numbered_frames, read_image, replace_frames, write_json
 from .process import process_images
 from .locking import project_lock
 
+REFERENCE_DIRS = ("references", "reference")
+
 
 class ConflictError(ValueError):
     """The on-disk project changed since the editor loaded it."""
@@ -135,7 +137,8 @@ class Project:
     def asset_revision(self, cfg: Config) -> str:
         digest = hashlib.sha256()
         for kind, root in (("source", cfg.source), ("processed", cfg.directory("processed_sprites")),
-                           ("final", cfg.directory("sprites"))):
+                           ("final", cfg.directory("sprites")),
+                           *((name, self.reference_root(name)) for name in REFERENCE_DIRS)):
             for path in sorted(root.rglob("*")):
                 if not path.is_file() or (path.suffix.lower() not in IMAGE_SUFFIXES and path.name != "_stage.json"):
                     continue
@@ -166,13 +169,22 @@ class Project:
 
     def image_path(self, kind: str, reference: str) -> Path:
         cfg = load_config(self.path)
-        roots = {"source": cfg.source, "processed": cfg.directory("processed_sprites")}
+        roots = {"source": cfg.source, "processed": cfg.directory("processed_sprites"), "reference": self.path.parent}
         if kind not in roots:
             raise ValueError("Unknown image category")
         path = inside(roots[kind], reference)
+        if kind == "reference":
+            directory = Path(reference).parts[0]
+            if directory not in REFERENCE_DIRS or not path.is_relative_to(self.reference_root(directory)):
+                raise ValueError("Reference images must be inside references/ or legacy reference/")
         if path.suffix.lower() not in IMAGE_SUFFIXES or not path.is_file():
             raise FileNotFoundError(reference)
         return path
+
+    def reference_root(self, name: str = "references") -> Path:
+        if name not in REFERENCE_DIRS:
+            raise ValueError("Unknown reference directory")
+        return inside(self.path.parent, name)
 
     def state(self) -> dict:
         with self.lock:
@@ -200,6 +212,17 @@ class Project:
                                 "count": sum(a["ref"].startswith(cfg.source_id(filename) + "/") for a in assets),
                                 "stale": bool(fingerprint and fingerprint != self.fingerprint(cfg, filename))})
             legacy_count = len(list(cfg.directory("sprites").rglob("*.png")))
+            reference_images = []
+            for name in REFERENCE_DIRS:
+                root = self.reference_root(name)
+                for path in sorted(root.rglob("*")):
+                    if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
+                        relative = path.relative_to(root).as_posix()
+                        inside(root, relative)
+                        ref = name + "/" + relative
+                        with Image.open(path) as image:
+                            reference_images.append({"ref": ref, "file": relative, "size": list(image.size),
+                                "url": image_url("reference", ref, path, self.project_id)})
             warnings = []
             missing = set(cfg.data.get("sources", {})) - set(discovered)
             if missing:
@@ -210,6 +233,7 @@ class Project:
             if missing_refs:
                 warnings.append(f"有 {len(missing_refs)} 个动作素材引用缺失，请准备素材或调整引用。")
             return {"data": cfg.data, "revision": hashlib.sha256(raw).hexdigest(), "sources": sources, "assets": assets,
+                    "references": reference_images,
                     "asset_revision": self.asset_revision(cfg), "warnings": warnings,
                     "project_file": self.path.name, "legacy_count": legacy_count}
 
@@ -358,6 +382,8 @@ class Project:
                     raise ValueError(f"Processed sprite must use the project canvas {cfg.size}")
                 destination = inside(cfg.directory("processed_sprites"), "imports/" + Path(filename).stem + ".png")
                 content = png_bytes(image)
+            elif kind == "reference":
+                destination = inside(self.reference_root(), filename)
             else:
                 raise ValueError("Unknown upload category")
             if destination.exists():
@@ -371,6 +397,99 @@ class Project:
                 output.write(content)
             write_json(self.path, cfg.data)
             return self.state()
+
+    def delete(self, kind: str, references: list[str], data: dict, revision: str,
+               asset_revision: str | None = None) -> dict:
+        """Delete a validated batch; in-use sprites and partial failures are protected."""
+        with self.lock:
+            self.check_revision(revision)
+            self.check_assets(asset_revision)
+            cfg = self.draft(data)
+            validate_editor(cfg)
+            if (not isinstance(references, list) or not 1 <= len(references) <= 1000
+                    or any(not isinstance(ref, str) for ref in references)
+                    or len({ref.casefold() for ref in references}) != len(references)):
+                raise ValueError("Select 1–1000 distinct image references")
+            targets = []
+            blocked_refs = set()
+            prefixes = []
+            metadata = {}
+            def target_path(root: Path, reference: str) -> Path:
+                path = inside(root, reference)
+                if path != (root / reference).absolute():
+                    raise ValueError("Linked paths cannot be deleted automatically; remove the link separately")
+                return path
+            if kind == "source":
+                known = set(cfg.discover_sources(allow_empty=True, allow_missing=True)) | set(cfg.data.get("sources", {}))
+                for ref in references:
+                    if ref not in known:
+                        raise FileNotFoundError(f"Unknown source: {ref}")
+                    source = target_path(cfg.source, ref)
+                    if source.exists():
+                        if not source.is_file():
+                            raise ValueError(f"Source is not an image file: {ref}")
+                        targets.append(source)
+                    prefix = cfg.source_id(ref)
+                    if any(name != ref and cfg.source_id(name).casefold().startswith(prefix.casefold() + "/") for name in known):
+                        raise ValueError("Source output directories overlap; fix the source rules before deletion")
+                    prefixes.append(prefix + "/")
+                    for stage in ("source_sprites", "processed_sprites"):
+                        root = cfg.directory(stage)
+                        directory = target_path(root, prefix)
+                        if directory.exists():
+                            # Resolve every descendant before moving a directory;
+                            # a junction must never turn deletion into an escape.
+                            for path in directory.rglob("*"):
+                                inside(root, path.relative_to(root).as_posix())
+                            targets.append(directory)
+                    cfg.data.get("sources", {}).pop(ref, None)
+            elif kind == "processed":
+                blocked_refs.update(references)
+                for ref in references:
+                    path = self.image_path(kind, ref)
+                    target_path(cfg.directory("processed_sprites"), ref)
+                    if path.suffix.lower() != ".png":
+                        raise ValueError("Processed references must be PNG files")
+                    targets.append(path)
+                    stage = target_path(cfg.directory("processed_sprites"), str(Path(ref).parent / "_stage.json"))
+                    if stage.is_file():
+                        payload = metadata.setdefault(stage, json.loads(stage.read_text(encoding="utf-8")))
+                        payload["files"] = [name for name in payload.get("files", []) if name != path.name]
+                        # Retain region identities and overrides: explicitly
+                        # applying the source later may regenerate this sprite.
+            elif kind == "reference":
+                targets = [self.image_path(kind, ref) for ref in references]
+                for ref in references:
+                    target_path(self.path.parent, ref)
+            else:
+                raise ValueError("Unknown deletion category")
+            uses = {name for name in cfg.data["actions"] for ref in cfg.action(name).get("sprites") or []
+                    if ref in blocked_refs or any(ref.startswith(prefix) for prefix in prefixes)}
+            if uses:
+                raise ValueError("素材仍被动作使用，请先从这些动作移除或替换引用：" + ", ".join(sorted(uses)))
+            self.check_revision(revision)
+            self.check_assets(asset_revision)
+            replacements = {**metadata, self.path: cfg.data}
+            # Stage removed files and old metadata beside the project. If a
+            # filesystem write fails, put them all back before reporting failure.
+            with TemporaryDirectory(prefix=".sprite-delete-", dir=self.path.parent) as temporary:
+                staged = []
+                written = []
+                try:
+                    for index, path in enumerate(dict.fromkeys([*targets, *replacements])):
+                        backup = Path(temporary) / str(index)
+                        path.replace(backup)
+                        staged.append((path, backup))
+                    for path, payload in replacements.items():
+                        write_json(path, payload)
+                        written.append(path)
+                except BaseException:
+                    for path in reversed(written):
+                        path.unlink()
+                    for path, backup in reversed(staged):
+                        backup.replace(path)
+                    raise
+            return {**self.state(), "deleted": len(references)}
 
     def export(self, data: dict, options: dict) -> tuple[bytes, str, str]:
         with self.lock:
@@ -392,13 +511,12 @@ class Project:
                         if path.is_file() and (path.suffix.lower() == ".png" or path.name == "_stage.json"):
                             reference = path.relative_to(root).as_posix()
                             archive.write(inside(root, reference), "processed_sprites/" + reference)
-                    reference_root = cfg.path.parent / "reference"
-                    if not reference_root.resolve().is_relative_to(cfg.path.parent):
-                        raise ValueError("Reference directory must remain inside the project")
-                    for path in reference_root.rglob("*"):
-                        if path.is_file():
-                            relative = path.relative_to(reference_root).as_posix()
-                            archive.write(inside(reference_root, relative), "reference/" + relative)
+                    for name in REFERENCE_DIRS:
+                        reference_root = self.reference_root(name)
+                        for path in reference_root.rglob("*"):
+                            if path.is_file():
+                                relative = path.relative_to(reference_root).as_posix()
+                                archive.write(inside(reference_root, relative), name + "/" + relative)
                     readme = cfg.path.parent / "README.md"
                     if readme.is_file():
                         archive.write(inside(cfg.path.parent, "README.md"), "README.md")

@@ -104,6 +104,8 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
             return project.prepare(data, revision, assets)
         if operation == "migrate":
             return project.migrate(data, revision, assets)
+        if operation == "delete":
+            return project.delete(payload["kind"], payload["references"], data, revision, assets)
         if operation == "upload":
             try:
                 content = base64.b64decode(payload["content"], validate=True)

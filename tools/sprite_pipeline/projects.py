@@ -132,11 +132,11 @@ class ProjectStore:
             with TemporaryDirectory(prefix=".sprite-project-", dir=self.root) as temporary:
                 staged = Path(temporary) / project_id
                 staged.mkdir()
-                for directory in ("source", "source_sprites", "processed_sprites", "reference"):
+                for directory in ("source", "source_sprites", "processed_sprites", "references"):
                     (staged / directory).mkdir()
                 write_json(staged / "pipeline.json", data)
                 (staged / "README.md").write_text(
-                    f"# {name}\n\n原图放入 source/，参考资料放入 reference/。\n"
+                    f"# {name}\n\n原图放入 source/，参考资料放入 references/。\n"
                     "处理规则、动作和 Review 统一保存于 pipeline.json。\n"
                     "人工修图放入 processed_sprites/imports/，保持工程画布尺寸。\n"
                     "source_sprites/ 是可重建缓存；exports/ 仅按需生成。\n", encoding="utf-8")
