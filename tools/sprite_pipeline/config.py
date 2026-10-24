@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import re
@@ -13,6 +14,11 @@ from pathlib import Path
 OUTPUT_DIRS = ("source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 NAME = re.compile(r"[A-Za-z0-9_-]+\Z")
+PROJECT_PATHS = {
+    "source": "source", "source_sprites": "source_sprites", "processed_sprites": "processed_sprites",
+    "sprites": "exports/frames", "spritesheets": "exports/sheets", "webp": "exports/previews",
+    "metadata": "exports/metadata", "manifest": "exports/manifest.json",
+}
 
 
 def positive(value, label: str) -> float:
@@ -82,21 +88,25 @@ class Config:
     def source_id(self, filename: str) -> str:
         return Path(filename).with_suffix("").as_posix()
 
-    def discover_sources(self) -> list[str]:
+    def discover_sources(self, *, allow_empty: bool = False, allow_missing: bool = False) -> list[str]:
         """Discover every original image, regardless of action selections."""
         if not self.source.is_dir():
+            if allow_empty and allow_missing:
+                return []
             raise FileNotFoundError(f"Source directory does not exist: {self.source}")
         filenames = sorted(path.relative_to(self.source).as_posix() for path in self.source.rglob("*")
                            if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES)
-        if not filenames:
+        if not filenames and not allow_empty:
             raise ValueError(f"No source images found in {self.source}")
         stale = set(self.data.get("sources", {})) - set(filenames)
-        if stale:
+        if stale and not allow_missing:
             raise ValueError(f"Source rules refer to missing images: {', '.join(sorted(stale))}")
         ids = {}
         for filename in filenames:
             inside(self.source, filename)
             key = self.source_id(filename).casefold()
+            if key.split("/")[0] in {"imports", "_approved"}:
+                raise ValueError(f"Source name uses a reserved processed directory: {filename}")
             if key in ids:
                 raise ValueError(f"Source images share the same output directory: {ids[key]}, {filename}")
             ids[key] = filename
@@ -114,6 +124,13 @@ def load_config(path: Path, output_root: Path | None = None) -> Config:
     return config_from_data(data, path, output_root)
 
 
+def source_fingerprint(cfg: Config, filename: str) -> str:
+    digest = hashlib.sha256(inside(cfg.source, filename).read_bytes())
+    digest.update(json.dumps({"rules": cfg.source_spec(filename), "size": cfg.size, "anchor": cfg.anchor},
+                             sort_keys=True).encode())
+    return digest.hexdigest()
+
+
 def config_from_data(data: dict, path: Path, output_root: Path | None = None) -> Config:
     """Validate an independent, in-memory draft without touching project files."""
     path = path.resolve()
@@ -124,6 +141,9 @@ def config_from_data(data: dict, path: Path, output_root: Path | None = None) ->
         raise ValueError("Unsupported pipeline config version; expected 2 with separate sources and actions")
     if not NAME.fullmatch(data.get("character", "")):
         raise ValueError("character must contain only letters, numbers, underscores and hyphens")
+    project = data.get("project", {})
+    if not isinstance(project, dict) or not isinstance(project.get("name", ""), str):
+        raise ValueError("project must be an object with an optional display name")
     size = data.get("frame_size")
     if not isinstance(size, list) or len(size) != 2:
         raise ValueError("frame_size must be [width, height]")
@@ -143,9 +163,19 @@ def config_from_data(data: dict, path: Path, output_root: Path | None = None) ->
         if value > limit:
             raise ValueError("anchor.pixels must be within the frame canvas")
     data.setdefault("paths", {})
+    if not isinstance(data["paths"], dict):
+        raise ValueError("paths must be an object")
     cfg = Config(path, (output_root or path.parent).resolve(), data)
+    if "manifest" in data["paths"]:
+        manifest = inside(cfg.root, data["paths"]["manifest"])
+        if manifest.suffix.lower() != ".json":
+            raise ValueError("paths.manifest must be a JSON file")
+        if manifest.is_relative_to(cfg.source) or manifest == path:
+            raise ValueError("Manifest must not overwrite project inputs")
     dirs = [cfg.directory(stage) for stage in OUTPUT_DIRS]
     for i, directory in enumerate(dirs):
+        if "manifest" in data["paths"] and (manifest.is_relative_to(directory) or directory.is_relative_to(manifest)):
+            raise ValueError("Manifest and output stage directories must not overlap")
         for other in dirs[i + 1:]:
             if directory.is_relative_to(other) or other.is_relative_to(directory):
                 raise ValueError("Output stage directories must be distinct and must not contain each other")

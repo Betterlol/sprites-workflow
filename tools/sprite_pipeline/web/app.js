@@ -10,7 +10,7 @@ const info = (key, value) => `<div class="info-row"><span>${key}</span><strong>$
 const section = (title, body) => `<section class="inspector-section"><h3>${title}</h3>${body}</section>`;
 const state = {mode:'action', data:null, revision:null, token:null, assets:[], sources:[], action:null, source:null, review:null,
   selected:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewError:null,
-  history:[], future:[], saved:null, busy:false, previewEpoch:0};
+  history:[], future:[], saved:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false};
 let previewTimer, toastTimer;
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
@@ -20,7 +20,9 @@ function toast(message, error = false) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { box.hidden = true; }, error ? 10000 : 4000);
 }
 async function api(path, payload, binary = false) {
-  const response = await fetch(`/api/${path}`, payload === undefined ? {} : {
+  const route = path.startsWith('projects') || !state.projectId ? path
+    : `projects/${encodeURIComponent(state.projectId)}${path === 'project' ? '' : '/' + path}`;
+  const response = await fetch(`/api/${route}`, payload === undefined ? {} : {
     method:'POST', headers:{'Content-Type':'application/json','X-Workbench-Token':state.token}, body:JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -29,7 +31,7 @@ async function api(path, payload, binary = false) {
   }
   return binary ? response : response.json();
 }
-const payload = extra => ({data:state.data, revision:state.revision, ...extra});
+const payload = extra => ({data:state.data, revision:state.revision, asset_revision:state.assetRevision, ...extra});
 async function task(message, operation) {
   if (state.busy) return;
   state.busy = true; $('#canvas-loading').hidden = false; $('#canvas-loading').textContent = message;
@@ -38,17 +40,19 @@ async function task(message, operation) {
   catch (error) { toast(error.message, true); }
   finally { state.busy = false; $('#canvas-loading').hidden = true; ['.workspace','.modebar','.top-actions'].forEach(selector => { $(selector).inert = false; }); updateSaveStatus(); }
 }
-function reviews() { return state.data.workbench?.reviews || {}; }
+function reviews() { return state.data?.workbench?.reviews || {}; }
 function currentReview() { return reviews()[state.review]; }
 function currentAction() { return state.data.actions[state.action]; }
 function sourceInfo() { return state.sources.find(source => source.file === state.source); }
 function asset(ref) { return state.assets.find(item => item.ref === ref); }
 function dirty() { return state.data && JSON.stringify(state.data) !== state.saved; }
 function updateSaveStatus() {
-  $('#save-status').textContent = state.busy ? '正在处理…' : dirty() ? '● 有未保存的更改' : '✓ 工程已保存';
+  $('#save-status').textContent = state.busy ? '正在处理…' : state.externalChange ? '● 磁盘内容已变化' : dirty() ? '● 有未保存的更改' : '✓ 工程已保存';
   $('#save-status').classList.toggle('dirty', !!dirty());
   $('#undo').disabled = !state.history.length; $('#redo').disabled = !state.future.length;
   $('#save').disabled = state.busy || !dirty();
+  $('#prepare').disabled = state.busy || !state.sources.length;
+  $('#migrate').disabled = state.busy || !state.legacyCount;
 }
 function checkpoint() {
   state.history.push(clone(state.data)); if (state.history.length > 60) state.history.shift(); state.future = [];
@@ -60,6 +64,7 @@ function change(operation, {render = true, preview = false} = {}) {
 }
 function setSnapshot(snapshot) {
   state.data = snapshot.data; state.revision = snapshot.revision; state.assets = snapshot.assets; state.sources = snapshot.sources;
+  state.assetRevision = snapshot.asset_revision; state.externalChange = false; $('#external-change').hidden = true;
   state.token = snapshot.token || state.token; state.saved = JSON.stringify(snapshot.data);
   state.legacyCount = snapshot.legacy_count; state.history = []; state.future = [];
   state.action = state.data.actions[state.action] ? state.action : Object.keys(state.data.actions)[0];
@@ -67,20 +72,141 @@ function setSnapshot(snapshot) {
   state.review = reviews()[state.review] ? state.review : Object.keys(reviews())[0];
   state.preview = null; state.previewSource = null; state.previewError = null; state.previewEpoch++;
   player.setProject(state.data, state.assets); renderAll();
+  const name = snapshot.project?.name || state.data.project?.name || state.data.character;
+  $('#project-name').textContent = name;
+  $('#project-name').title = snapshot.project?.directory || '';
+  if (snapshot.warnings?.length) toast(snapshot.warnings.join('\n'),true);
 }
 async function loadProject() {
   const snapshot = await api('project'); setSnapshot(snapshot);
-  $('#project-name').textContent = `${snapshot.data.character} / ${snapshot.project_file}`;
+  suggestReviews();
+  if (!state.assets.length && !snapshot.warnings?.length) toast(state.sources.length ? '点击“准备缺失素材”开始处理，或保留已有最终帧。' : '工程已就绪：点击原图旁的 ＋ 导入图片，也可以先导入单帧素材。');
+}
+function suggestReviews() {
   // Suggested review sequences are editable drafts, never silently written.
-  if (!snapshot.data.workbench?.reviews) {
+  if (!state.data.workbench?.reviews) {
     const defaults = defaultReviews(state.data);
     if (Object.keys(defaults).length) {
       checkpoint(); state.data.workbench = {...state.data.workbench, reviews:defaults};
       state.review = Object.keys(defaults)[0]; renderAll();
     }
   }
-  if (!state.assets.length) toast('还没有 processed 素材：点击“准备缺失素材”，或“保留已有最终帧”。');
 }
+
+async function listProjects() {
+  const result = await api('projects'); state.token = result.token;
+  $('#workspace-location').textContent = result.workspace_root;
+  $('#project-list').innerHTML = result.projects.map(project => `<article class="project-card">
+    <span class="eyebrow">${project.external ? 'OPENED WITH CONFIG' : escape(project.id)}</span>
+    <h2>${escape(project.name)}</h2>
+    <p class="hint">${project.error ? escape(project.error) : `${project.frame_size.join(' × ')} · ${escape(project.character)}`}</p>
+    <button class="${project.error ? '' : 'primary'}" data-project="${escape(project.id)}" ${project.error ? 'disabled' : ''}>打开工程 →</button>
+    </article>`).join('') || '<div class="projects-empty"><h2>还没有工程</h2><p class="muted">点击“新建工程”，开始导入素材和制作动作。</p></div>';
+  $('#project-list').querySelectorAll('[data-project]').forEach(button => { button.onclick = () => openProject(button.dataset.project); });
+  return result;
+}
+
+async function openProject(projectId) {
+  if (state.busy || (dirty() && !confirm('切换工程会放弃当前未保存的草稿。继续？'))) return;
+  await task('正在打开工程…',async () => {
+    const snapshot = await api('projects/' + encodeURIComponent(projectId));
+    clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
+    player.reset(); state.projectId = projectId;
+    state.action = null; state.source = null; state.review = null; state.selected = 0; state.clip = 0;
+    state.mode = snapshot.sources.length || !snapshot.assets.length ? 'source' : 'action';
+    state.sourceView = 'processed'; state.playbackMode = 'runtime';
+    $('#asset-search').value = ''; $('#asset-source').value = '';
+    $('#source-upload').value = ''; $('#processed-upload').value = '';
+    document.body.classList.remove('project-home'); setSnapshot(snapshot); suggestReviews();
+    history.replaceState(null,'','?project=' + encodeURIComponent(projectId));
+    player.resize();
+    if (!snapshot.assets.length && !snapshot.sources.length) toast('工程已创建，可以导入第一张原图或单帧素材。');
+  });
+}
+
+async function showProjects() {
+  if (state.busy || (dirty() && !confirm('返回工程列表会放弃当前未保存的草稿。继续？'))) return;
+  await task('正在读取工程…',async () => {
+    await listProjects(); clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
+    player.reset(); state.data = null; state.saved = null; state.projectId = null;
+    state.externalChange = false; $('#external-change').hidden = true;
+    document.body.classList.add('project-home'); $('#project-name').textContent = '工程列表';
+    history.replaceState(null,'',location.pathname);
+  });
+}
+
+function showExternalChange(message) {
+  state.externalChange = true; $('#external-change').hidden = false;
+  $('#external-message').textContent = message; updateSaveStatus();
+}
+
+async function refreshExternal() {
+  if (state.busy || !state.projectId) return;
+  await task('正在刷新工程…',async () => {
+    const snapshot = await api('project');
+    if (dirty() && snapshot.revision !== state.revision) {
+      if (!confirm('配置已被外部修改。重新载入会放弃页面草稿；可先取消并下载配置草稿。继续？')) return;
+      player.pause(); setSnapshot(snapshot);
+    } else if (dirty()) {
+      // Refresh pixels while keeping the user's recipe, history and selection.
+      state.assets = snapshot.assets; state.sources = snapshot.sources; state.assetRevision = snapshot.asset_revision;
+      state.legacyCount = snapshot.legacy_count; state.externalChange = false; $('#external-change').hidden = true;
+      state.preview = null; state.previewSource = null; state.previewEpoch++;
+      player.pause(); renderAll();
+      if (snapshot.warnings?.length) toast(snapshot.warnings.join('\n'),true);
+    } else { player.pause(); setSnapshot(snapshot); }
+    if (state.mode === 'source') schedulePreview();
+  });
+}
+
+let checkingDisk = false;
+async function checkExternalChanges() {
+  if (checkingDisk || state.busy || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#export-dialog').open) return;
+  checkingDisk = true;
+  const projectId = state.projectId;
+  try {
+    const changes = await api('changes');
+    if (projectId !== state.projectId || state.busy) return;
+    if (changes.revision === state.revision && changes.asset_revision === state.assetRevision) {
+      if (state.externalChange) { state.externalChange = false; $('#external-change').hidden = true; updateSaveStatus(); }
+      return;
+    }
+    if (dirty()) showExternalChange(changes.revision !== state.revision
+      ? '配置已被外部修改，当前草稿已保留。可下载草稿，或重新载入工程。'
+      : '素材已被外部修改。点击刷新可更新素材，并保留当前配置草稿。');
+    else {
+      const snapshot = await api('project');
+      // A user may have edited or switched projects while the request was in flight.
+      if (projectId === state.projectId && !state.busy && !dirty()) { player.pause(); setSnapshot(snapshot); }
+    }
+  } catch (error) {
+    if (projectId === state.projectId) showExternalChange('无法读取磁盘工程：' + error.message);
+  } finally { checkingDisk = false; }
+}
+
+$('#projects-open').onclick = showProjects;
+$('#projects-refresh').onclick = () => task('正在刷新列表…',listProjects);
+$('#project-new').onclick = () => { $('#project-create-error').hidden = true; $('#project-form').reset(); $('#project-dialog').showModal(); };
+$('#project-close').onclick = () => $('#project-dialog').close();
+$('#project-form').onsubmit = async event => {
+  event.preventDefault(); const submit = $('#project-create'); submit.disabled = true; $('#project-create-error').hidden = true;
+  try {
+    const id = $('#new-project-id').value.trim();
+    const project = await api('projects',{name:$('#new-project-name').value.trim(), ...(id ? {id} : {}),
+      frame_size:[Number($('#new-project-width').value),Number($('#new-project-height').value)],
+      anchor:[Number($('#new-project-anchor-x').value),Number($('#new-project-anchor-y').value)]});
+    $('#project-dialog').close(); await openProject(project.id);
+  } catch (error) { $('#project-create-error').textContent = error.message; $('#project-create-error').hidden = false; }
+  finally { submit.disabled = false; }
+};
+$('#external-refresh').onclick = refreshExternal;
+$('#draft-download').onclick = () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(state.data,null,2) + '\n'],{type:'application/json'}));
+  const link = document.createElement('a'); link.href = url; link.download = 'pipeline-draft.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url),1000);
+};
+window.addEventListener('focus',checkExternalChanges);
+setInterval(checkExternalChanges,3000);
 async function save() {
   return task('正在保存工程…', async () => {
     const result = await api('save', payload()); state.revision = result.revision; state.saved = JSON.stringify(state.data); toast('工程已保存');
@@ -172,7 +298,7 @@ function refreshPlayer({seek = true} = {}) {
   $('#empty-canvas').hidden = steps.length > 0 || !!player.sourceView;
   const missing = steps.filter(step => !step.url && !asset(step.ref));
   if (missing.length) { $('#empty-canvas').hidden = false; $('#empty-canvas strong').textContent = '动作引用的素材尚未就绪'; $('#empty-canvas p').textContent = '点击“准备缺失素材”，或从已有最终帧导入'; }
-  else { $('#empty-canvas strong').textContent = '从素材开始，编排动作'; $('#empty-canvas p').textContent = '点击左侧素材，或将它拖入下方时间轴'; }
+  else { $('#empty-canvas strong').textContent = state.mode === 'source' ? '导入原图，开始处理素材' : '从素材开始，编排动作'; $('#empty-canvas p').textContent = state.mode === 'source' ? '点击原图旁的 ＋，选择图片后预览并应用处理' : '点击左侧素材，或将它拖入下方时间轴'; }
   $('#total-time').textContent = (steps.reduce((sum, step) => sum + step.duration_ms, 0) / 1000).toFixed(2) + 's';
   $('#timeline-stats').textContent = `${steps.length} FRAMES`;
   $('#play').textContent = player.playing ? 'Ⅱ' : '▶';
@@ -585,7 +711,7 @@ function openExport() {
 function updateExportFormat() {
   const format = $('#export-format').value;
   $('#export-actions').hidden = ['project','review'].includes(format);
-  $('#export-note').textContent = format === 'review' ? '导出当前 Review，使用片段范围、重复次数及所选播放模式。' : format === 'project' ? '包含全部原图、processed 和工程配置。解压后可用 --config 打开。' : '图集使用游戏帧顺序；WebP 使用独立的展示播放配置。';
+  $('#export-note').textContent = format === 'review' ? '导出当前 Review，使用片段范围、重复次数及所选播放模式。' : format === 'project' ? '包含原图、processed、参考资料、说明和工程配置。解压到工作区即可重新打开。' : '图集使用游戏帧顺序；WebP 使用独立的展示播放配置。';
 }
 $('#export-open').onclick = openExport; $('#export-close').onclick = () => $('#export-dialog').close(); $('#export-format').onchange = updateExportFormat;
 $('#export-form').onsubmit = async event => {
@@ -604,7 +730,7 @@ $('#export-form').onsubmit = async event => {
 };
 
 document.addEventListener('keydown', event => {
-  if (!state.data) return;
+  if (!state.data || state.busy || $('#project-dialog').open) return;
   const editable = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!$('#export-dialog').open) save(); return; }
   if (editable || $('#export-dialog').open) return;
@@ -615,4 +741,10 @@ document.addEventListener('keydown', event => {
   else if (event.key === 'Delete' && state.mode === 'action') removeFrame();
 });
 window.addEventListener('beforeunload',event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
-loadProject().catch(error => { toast(error.message,true); $('#project-name').textContent = '工程载入失败'; $('#save-status').textContent = '请检查服务日志或重新载入'; });
+async function start() {
+  $('#project-name').textContent = '工程列表';
+  const listing = await listProjects();
+  const requested = new URLSearchParams(location.search).get('project') || listing.initial_project;
+  if (requested) await openProject(requested);
+}
+start().catch(error => { toast(error.message,true); $('#project-list').textContent = '工程列表载入失败，请刷新重试。'; });

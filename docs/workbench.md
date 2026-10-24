@@ -9,7 +9,9 @@ python -m pip install -r tools/requirements-workbench.txt
 python tools/serve_sprites.py
 ```
 
-默认打开 `http://127.0.0.1:8765`，服务仅监听本机。可用 `--config` 指定另一个现有工程、`--port` 指定端口、`--no-browser` 禁止自动打开浏览器。关闭服务终端即可停止。
+默认打开 `http://127.0.0.1:8765` 的工程列表，服务仅监听本机。支持新建、打开和切换 `workspaces/` 下的工程；可用 `--workspace-root` 指定工作区根目录、`--config` 直接打开已有工程（包括旧布局）、`--port` 指定端口、`--no-browser` 禁止自动打开浏览器。关闭服务终端即可停止。
+
+新建工程时设置名称、目录名、画布大小和归一化锚点。目录名留空则使用名称，支持中文。新工程可以没有原图和动作，也可以仅导入 processed 单帧。工作台不会自动迁移 `assets/`。目录和 CLI 约定见 [工作区说明](../workspaces/README.md)。
 
 首次打开会读取现有 processed 和动作。没有 processed 时，可以“准备缺失素材”，只生成尚未存在的原图处理目录。已有目录不会被这个操作重建。
 
@@ -31,6 +33,10 @@ python tools/serve_sprites.py
 编辑操作支持撤销 / 重做，历史保留在本次网页会话中。应用、准备、导入和迁移会清空本次历史；它们是已写入磁盘的操作。如需保留此前的图片版本，先导出完整工程。关闭网页前会提醒未保存草稿。
 
 保存使用工程文件摘要做冲突检查。其他窗口或 CLI 改变配置后，旧窗口不能直接覆盖它；可以先导出当前工程草稿，再重新载入并合并所需更改。
+
+工作台在页面可见时每 3 秒、以及返回窗口时检查外部修改。没有未保存编辑时自动更新；有草稿时显示提示并保留草稿。仅图片变化可点击“刷新”更新素材而保留配置；配置也变化时，可先“下载配置草稿”，再重新载入并合并。切换工程会提醒未保存修改。
+
+网页、`projects.py` 和分阶段 CLI 共用工程级跨进程锁。素材写入同时检查素材版本，避免旧页面覆盖 Agent 更新的图片。手工直接写文件不受锁控制，建议先写临时文件再替换，并让网页刷新后再继续处理。
 
 ## 素材处理
 
@@ -85,11 +91,11 @@ python tools/serve_sprites.py
 - **WebP**：按展示顺序、逐步时长和展示循环编码，并附播放记录。
 - **完整动作资源**：包含上述三类，可选择一个或多个动作。
 - **Review**：当前 Review 的 WebP 与播放记录。
-- **完整工程**：全部原图、processed PNG / 阶段描述和工程 JSON。路径统一为相对路径，解压后以 `--config <解压路径>/pipeline.json` 打开。
+- **完整工程**：原图、processed PNG / 阶段描述、工程 JSON、`reference/` 和工程 `README.md`。路径统一为相对路径，解压到 `workspaces/<目录名>/` 即可在列表中打开，也可以通过 `--config` 打开。切图缓存和交付目录不包含在备份中。
 
 其他导出类型用于交付游戏资源；需要重新打开整个编辑工程时，请选择“完整工程”。所有导出都基于当前动作草稿和已应用的图片，不要求先保存配置，也不写入项目的 `frames/`、`sheets/` 或 `previews/`。
 
-`source_sprites/` 与可重建的 processed 子目录继续被 Git 忽略。`_approved/`、`imports/` 是不可自动重建的素材，应随工程保存。直接在自动生成目录手工修图时，可导出完整工程，或用 `git add -f` 保存这些图片。
+`source_sprites/`、临时文件、锁和工作区工程的 `exports/` 被 Git 忽略。processed 全部默认保留，其中 `_approved/` 和 `imports/` 尤其不能按缓存清理。
 
 ## 开发与检查
 
@@ -101,6 +107,7 @@ CLI 与网页共用 `cut_frames`、`process_images` 和已有打包逻辑。
 python -m pip install httpx
 python -m unittest discover -s tests -v
 node tests/test_workbench_model.mjs
+node tests/test_workbench_session.mjs
 ```
 
 Node 仅用于可选的前端模型检查，日常运行工作台不需要 Node。

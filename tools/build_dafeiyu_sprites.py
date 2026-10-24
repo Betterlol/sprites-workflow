@@ -9,7 +9,7 @@ from pathlib import Path
 from sprite_pipeline.cli import main as run_pipeline
 
 
-CONFIG = Path(__file__).resolve().parents[1] / "assets" / "sprites" / "dafeiyu" / "pipeline.json"
+CONFIG = Path(__file__).resolve().parents[1] / "workspaces" / "dafeiyu" / "pipeline.json"
 
 
 def main() -> int:

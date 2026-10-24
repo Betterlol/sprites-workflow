@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from .config import Config, inside, integer, merge, positive
+from .config import Config, inside, integer, merge, positive, source_fingerprint
 from .files import read_image, replace_frames
 
 
@@ -82,6 +82,7 @@ def process_source(cfg: Config, filename: str) -> int:
     replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames, owned=r"\d+\.png", metadata={
         "stage": "process", "source": filename, "scale": scale, "files": list(frames),
         "frames": inventory.get("frames", []),
+        "fingerprint": source_fingerprint(cfg, filename),
         "inputs": {key: path.relative_to(cfg.directory("source_sprites")).as_posix() for key, path in sources.items()},
     })
     return len(frames)

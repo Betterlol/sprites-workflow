@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -11,7 +12,7 @@ from PIL import Image
 from texturepacker import TexturePackerFrame, write_texturepacker_hash
 
 from .animation import playback
-from .config import Config
+from .config import Config, inside
 from .files import numbered_frames, read_image, write_json
 
 
@@ -82,10 +83,14 @@ def pack_action(cfg: Config, name: str) -> dict:
 
 
 def update_manifest(cfg: Config, actions: list[dict]) -> None:
-    output = cfg.root / f"{cfg.character}_manifest.json"
+    output = inside(cfg.root, cfg.data["paths"].get("manifest", f"{cfg.character}_manifest.json"))
     manifest = json.loads(output.read_text(encoding="utf-8")) if output.exists() else {}
     existing = {entry["name"]: entry for entry in manifest.get("actions", [])}
-    existing.update({entry["name"]: entry for entry in actions})
+    for entry in actions:
+        entry = dict(entry)
+        for field in ("sheet", "preview"):
+            entry[field] = Path(os.path.relpath(cfg.root / entry[field], output.parent)).as_posix()
+        existing[entry["name"]] = entry
     manifest.update({
         "character": cfg.character, "version": cfg.data.get("manifest_version", 1),
         "frame_size": {"w": cfg.size[0], "h": cfg.size[1]}, "anchor": cfg.anchor,

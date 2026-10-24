@@ -6,6 +6,8 @@
 
 `pipeline.json` 使用 version 2；所有相对路径以此文件为基准。`paths.source` 指向原图，其他阶段目录位于输出根目录内且互不重叠。
 
+新工程创建于 `workspaces/<目录名>/`，原图和 processed 均位于工程内部。`project.name` 是可修改的展示名，目录名是网页请求的工程标识；`character` 用于交付文件命名。`paths.manifest` 可指定 manifest 文件位置，新工程默认写入 `exports/manifest.json`，其中图集和预览路径相对于 manifest 所在目录。旧工程省略此字段时保持原有位置。
+
 | 字段 | 作用 |
 | --- | --- |
 | `frame_size` | 统一 RGBA 画布 `[width, height]` |

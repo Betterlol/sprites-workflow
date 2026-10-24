@@ -10,7 +10,8 @@ import webbrowser
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local Sprite Workbench")
-    parser.add_argument("--config", type=Path, default=Path(__file__).resolve().parents[1] / "assets/sprites/dafeiyu/pipeline.json")
+    parser.add_argument("--config", type=Path, help="Open an existing pipeline.json directly (including legacy layouts)")
+    parser.add_argument("--workspace-root", type=Path, default=Path(__file__).resolve().parents[1] / "workspaces")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
@@ -21,9 +22,9 @@ def main() -> None:
         from sprite_pipeline.server import create_app
     except ImportError as error:
         parser.exit(1, f"Missing dependency: {error}. Install: python -m pip install -r tools/requirements-workbench.txt\n")
-    app = create_app(args.config)
+    app = create_app(args.config, args.workspace_root)
     url = f"http://127.0.0.1:{args.port}"
-    print(f"Sprite Workbench: {url}\nProject: {args.config.resolve()}", flush=True)
+    print(f"Sprite Workbench: {url}\nWorkspaces: {args.workspace_root.resolve()}", flush=True)
     if not args.no_browser:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

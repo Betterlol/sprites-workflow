@@ -12,6 +12,7 @@ from .export import final_frames, pack_action, preview_action, update_manifest
 from .extract import extract_source
 from .process import process_source
 from .select import select_action
+from .locking import project_lock
 
 
 STAGES = ("extract", "process", "select", "pack", "preview", "build")
@@ -26,6 +27,15 @@ def main(default_config: Path | None = None, argv: list[str] | None = None) -> i
     parser.add_argument("--output-root", type=Path, help="Write all stages into another directory; source paths remain config-relative")
     parser.add_argument("--no-preview", action="store_true", help="Do not render WebP during pack/build")
     args = parser.parse_args(argv)
+    try:
+        with project_lock(args.config):
+            return execute(args)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        print(f"Sprite pipeline error: {error}", file=sys.stderr)
+        return 1
+
+
+def execute(args) -> int:
     try:
         if args.no_preview and args.stage not in {"pack", "build"}:
             raise ValueError("--no-preview is only supported for pack/build")

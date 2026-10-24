@@ -12,20 +12,20 @@ import hashlib
 import io
 import json
 import shutil
-import threading
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from PIL import Image
 
 from .animation import playback
-from .config import Config, IMAGE_SUFFIXES, NAME, config_from_data, inside, integer, load_config
+from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_data, inside, integer, load_config, source_fingerprint
 from .export import pack_action, preview_action, update_manifest
 from .extract import cut_frames, preserve_slice_ids, previous_slices
 from .files import numbered_frames, read_image, replace_frames, write_json
 from .process import process_images
+from .locking import project_lock
 
 
 class ConflictError(ValueError):
@@ -42,9 +42,10 @@ def data_url(image: Image.Image) -> str:
     return "data:image/png;base64," + base64.b64encode(png_bytes(image)).decode("ascii")
 
 
-def image_url(kind: str, reference: str, path: Path) -> str:
+def image_url(kind: str, reference: str, path: Path, project_id: str | None = None) -> str:
     stat = path.stat()
-    return "/api/image?" + urlencode({"kind": kind, "ref": reference, "v": f"{stat.st_mtime_ns}-{stat.st_size}"})
+    route = f"/api/projects/{quote(project_id, safe='')}/image" if project_id is not None else "/api/image"
+    return route + "?" + urlencode({"kind": kind, "ref": reference, "v": f"{stat.st_mtime_ns}-{stat.st_size}"})
 
 
 def action_steps(cfg: Config, name: str, mode: str = "runtime") -> list[dict]:
@@ -117,9 +118,10 @@ def validate_editor(cfg: Config) -> None:
 
 
 class Project:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, project_id: str | None = None):
         self.path = path.resolve()
-        self.lock = threading.RLock()
+        self.project_id = project_id
+        self.lock = project_lock(self.path)
         load_config(self.path)
 
     @property
@@ -129,6 +131,27 @@ class Project:
     def check_revision(self, revision: str) -> None:
         if revision != self.revision:
             raise ConflictError("工程已被其他窗口或命令行修改，请重新载入后再操作；当前草稿仍保留在页面中。")
+
+    def asset_revision(self, cfg: Config) -> str:
+        digest = hashlib.sha256()
+        for kind, root in (("source", cfg.source), ("processed", cfg.directory("processed_sprites")),
+                           ("final", cfg.directory("sprites"))):
+            for path in sorted(root.rglob("*")):
+                if not path.is_file() or (path.suffix.lower() not in IMAGE_SUFFIXES and path.name != "_stage.json"):
+                    continue
+                relative = path.relative_to(root).as_posix()
+                inside(root, relative)
+                stat = path.stat()
+                digest.update(json.dumps([kind, relative, stat.st_mtime_ns, stat.st_size]).encode())
+        return digest.hexdigest()
+
+    def check_assets(self, revision: str | None) -> None:
+        if revision is not None and revision != self.asset_revision(load_config(self.path)):
+            raise ConflictError("工程素材已被外部修改，请刷新素材后重试；当前草稿仍保留。")
+
+    def changes(self) -> dict:
+        with self.lock:
+            return {"revision": self.revision, "asset_revision": self.asset_revision(load_config(self.path))}
 
     def draft(self, data: dict) -> Config:
         current = load_config(self.path)
@@ -153,17 +176,19 @@ class Project:
 
     def state(self) -> dict:
         with self.lock:
-            cfg = load_config(self.path)
+            raw = self.path.read_bytes()
+            cfg = config_from_data(json.loads(raw), self.path)
             assets = []
             root = cfg.directory("processed_sprites")
             for path in sorted(root.rglob("*.png")):
                 reference = path.relative_to(root).as_posix()
                 inside(root, reference)
                 with Image.open(path) as image:
-                    assets.append({"ref": reference, "url": image_url("processed", reference, path),
+                    assets.append({"ref": reference, "url": image_url("processed", reference, path, self.project_id),
                                    "size": list(image.size), "bbox": image.convert("RGBA").getbbox()})
             sources = []
-            for filename in cfg.discover_sources():
+            discovered = cfg.discover_sources(allow_empty=True, allow_missing=True)
+            for filename in discovered:
                 path = inside(cfg.source, filename)
                 with Image.open(path) as image:
                     size = list(image.size)
@@ -171,11 +196,21 @@ class Project:
                 stage_path = directory / "_stage.json"
                 stage = json.loads(stage_path.read_text(encoding="utf-8")) if stage_path.exists() else {}
                 fingerprint = stage.get("fingerprint")
-                sources.append({"file": filename, "url": image_url("source", filename, path), "size": size,
+                sources.append({"file": filename, "url": image_url("source", filename, path, self.project_id), "size": size,
                                 "count": sum(a["ref"].startswith(cfg.source_id(filename) + "/") for a in assets),
                                 "stale": bool(fingerprint and fingerprint != self.fingerprint(cfg, filename))})
             legacy_count = len(list(cfg.directory("sprites").rglob("*.png")))
-            return {"data": cfg.data, "revision": self.revision, "sources": sources, "assets": assets,
+            warnings = []
+            missing = set(cfg.data.get("sources", {})) - set(discovered)
+            if missing:
+                warnings.append("原图缺失，请恢复图片或移除对应规则：" + ", ".join(sorted(missing)))
+            references = {a["ref"] for a in assets}
+            missing_refs = {ref for name in cfg.data["actions"] for ref in cfg.action(name).get("sprites") or []
+                            if ref not in references}
+            if missing_refs:
+                warnings.append(f"有 {len(missing_refs)} 个动作素材引用缺失，请准备素材或调整引用。")
+            return {"data": cfg.data, "revision": hashlib.sha256(raw).hexdigest(), "sources": sources, "assets": assets,
+                    "asset_revision": self.asset_revision(cfg), "warnings": warnings,
                     "project_file": self.path.name, "legacy_count": legacy_count}
 
     def save(self, data: dict, revision: str) -> dict:
@@ -188,10 +223,7 @@ class Project:
             return {"revision": self.revision}
 
     def fingerprint(self, cfg: Config, filename: str) -> str:
-        digest = hashlib.sha256(inside(cfg.source, filename).read_bytes())
-        digest.update(json.dumps({"rules": cfg.source_spec(filename), "size": cfg.size, "anchor": cfg.anchor},
-                                 sort_keys=True).encode())
-        return digest.hexdigest()
+        return source_fingerprint(cfg, filename)
 
     def render(self, data: dict, filename: str) -> tuple[Config, dict, dict, list, float]:
         cfg = self.draft(data)
@@ -213,9 +245,10 @@ class Project:
                  "raw_url": data_url(raw[Path(item["file"]).stem]), "bbox": frames[item["file"]].getbbox()}
                 for item in descriptors]}
 
-    def apply(self, data: dict, revision: str, filename: str) -> dict:
+    def apply(self, data: dict, revision: str, filename: str, asset_revision: str | None = None) -> dict:
         with self.lock:
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             cfg, _, frames, descriptors, scale = self.render(data, filename)
             validate_editor(cfg)
             prefix = cfg.source_id(filename) + "/"
@@ -225,6 +258,7 @@ class Project:
             if broken:
                 raise ValueError("切图会移除正在使用的素材，请先从动作中移除或替换这些引用：" + ", ".join(sorted(broken)))
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
             directory = inside(cfg.directory("processed_sprites"), cfg.source_id(filename))
             replace_frames(directory, frames, owned=r"\d+\.png", metadata={
@@ -234,10 +268,11 @@ class Project:
             write_json(self.path, cfg.data)
             return self.state()
 
-    def prepare(self, data: dict, revision: str) -> dict:
+    def prepare(self, data: dict, revision: str, asset_revision: str | None = None) -> dict:
         """Prepare absent sources only; existing processed artwork is never rebuilt."""
         with self.lock:
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             cfg = self.draft(data)
             pending = []
             for filename in cfg.discover_sources():
@@ -248,6 +283,7 @@ class Project:
             # Render all sources before making any changes on validation failure.
             validate_editor(cfg)
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             for filename, (_, _, frames, descriptors, scale) in pending:
                 cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
                 replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames,
@@ -257,10 +293,11 @@ class Project:
             write_json(self.path, cfg.data)
             return self.state()
 
-    def migrate(self, data: dict, revision: str) -> dict:
+    def migrate(self, data: dict, revision: str, asset_revision: str | None = None) -> dict:
         """Preserve published/manual frame pixels as reusable approved assets."""
         with self.lock:
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             cfg = self.draft(data)
             copies = []
             changed = 0
@@ -288,15 +325,18 @@ class Project:
                 cfg.data["actions"][name]["sprites"] = references
             validate_editor(cfg)
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             for source, destination in copies:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, destination)
             write_json(self.path, cfg.data)
             return {**self.state(), "imported": changed}
 
-    def upload(self, kind: str, filename: str, content: bytes, data: dict, revision: str) -> dict:
+    def upload(self, kind: str, filename: str, content: bytes, data: dict, revision: str,
+               asset_revision: str | None = None) -> dict:
         with self.lock:
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             cfg = self.draft(data)
             if not filename or Path(filename).name != filename or any(c in filename for c in '\\/:*?"<>|\x00') or filename.endswith((" ", ".")):
                 raise ValueError("Use an image filename without directory components")
@@ -308,9 +348,11 @@ class Project:
             if kind == "source":
                 destination = inside(cfg.source, filename)
                 stem = Path(filename).with_suffix("").as_posix().casefold()
-                if any(cfg.source_id(name).casefold() == stem for name in cfg.discover_sources()):
+                if stem in {"imports", "_approved"}:
+                    raise ValueError("This filename is reserved for imported or approved sprites")
+                if any(cfg.source_id(name).casefold() == stem for name in cfg.discover_sources(allow_empty=True, allow_missing=True)):
                     raise ValueError("An original with this output name already exists")
-                cfg.data.setdefault("sources", {})[filename] = {"extract": {"method": "components"}}
+                cfg.data.setdefault("sources", {}).setdefault(filename, {})
             elif kind == "processed":
                 if image.size != cfg.size:
                     raise ValueError(f"Processed sprite must use the project canvas {cfg.size}")
@@ -322,6 +364,7 @@ class Project:
                 raise ValueError("An image with this filename already exists; rename the import")
             validate_editor(cfg)
             self.check_revision(revision)
+            self.check_assets(asset_revision)
             destination.parent.mkdir(parents=True, exist_ok=True)
             # Exclusive creation also avoids races with external import tools.
             with destination.open("xb") as output:
@@ -340,16 +383,25 @@ class Project:
             with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
                 if kind == "project":
                     project_data = copy.deepcopy(cfg.data)
-                    project_data["paths"] = {"source": "source", **{key: key for key in (
-                        "source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")}}
+                    project_data["paths"] = dict(PROJECT_PATHS)
                     archive.writestr("pipeline.json", json.dumps(project_data, ensure_ascii=False, indent=2))
-                    for filename in cfg.discover_sources():
+                    for filename in cfg.discover_sources(allow_empty=True, allow_missing=True):
                         archive.write(inside(cfg.source, filename), "source/" + filename)
                     root = cfg.directory("processed_sprites")
                     for path in root.rglob("*"):
                         if path.is_file() and (path.suffix.lower() == ".png" or path.name == "_stage.json"):
                             reference = path.relative_to(root).as_posix()
                             archive.write(inside(root, reference), "processed_sprites/" + reference)
+                    reference_root = cfg.path.parent / "reference"
+                    if not reference_root.resolve().is_relative_to(cfg.path.parent):
+                        raise ValueError("Reference directory must remain inside the project")
+                    for path in reference_root.rglob("*"):
+                        if path.is_file():
+                            relative = path.relative_to(reference_root).as_posix()
+                            archive.write(inside(reference_root, relative), "reference/" + relative)
+                    readme = cfg.path.parent / "README.md"
+                    if readme.is_file():
+                        archive.write(inside(cfg.path.parent, "README.md"), "README.md")
                 elif kind == "review":
                     review = options.get("review")
                     steps = review_steps(cfg, review)

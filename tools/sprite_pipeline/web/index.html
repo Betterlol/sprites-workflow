@@ -8,10 +8,11 @@
   <link rel="stylesheet" href="/static/style.css">
   <script type="module" src="/static/app.js"></script>
 </head>
-<body>
+<body class="project-home">
   <header class="topbar">
     <a class="brand" href="/" aria-label="Sprite Workbench 首页"><span class="brand-mark">S<span>·</span></span><span>SPRITE<span class="brand-sub">WORKBENCH</span></span></a>
     <div class="project-label"><span class="status-dot"></span><span id="project-name">正在打开工程…</span><span class="local-tag">LOCAL</span></div>
+    <button id="projects-open" class="subtle">工程列表</button>
     <div class="top-actions">
       <button id="undo" class="icon-button" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
       <button id="redo" class="icon-button" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button>
@@ -20,6 +21,14 @@
       <button id="export-open" class="primary">导出资源 <span>↗</span></button>
     </div>
   </header>
+
+  <section id="projects-home" class="projects-home">
+    <div class="projects-heading"><div><span class="eyebrow">YOUR PROJECTS</span><h1>Sprite 工程</h1><p class="muted">创建工程，导入原图，再处理素材和编排动作。</p></div><div class="project-home-actions"><button id="projects-refresh">刷新列表</button><button id="project-new" class="primary">＋ 新建工程</button></div></div>
+    <p id="workspace-location" class="hint"></p>
+    <div id="project-list" class="project-grid" aria-live="polite"><p class="muted">正在读取工程列表…</p></div>
+  </section>
+
+  <div id="external-change" class="external-change" hidden role="status"><span id="external-message"></span><button id="external-refresh">刷新</button><button id="draft-download">下载配置草稿</button></div>
 
   <nav class="modebar" aria-label="工作模式">
     <div class="mode-tabs" role="tablist">
@@ -60,6 +69,16 @@
 
   <footer class="statusbar"><span id="status-message" role="status">所有素材保存在本机 · 导出时生成文件</span><span>← → 单步 <span class="divider">/</span> Space 播放 <span class="divider">/</span> Ctrl S 保存</span></footer>
   <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="project-dialog">
+    <form id="project-form"><div class="dialog-heading"><div><span class="eyebrow">NEW PROJECT</span><h2>新建工程</h2></div><button type="button" id="project-close" class="icon-button" aria-label="关闭">×</button></div>
+      <label class="field">工程名称<input id="new-project-name" required maxlength="120" placeholder="例如：大肥鱼"></label>
+      <label class="field">工作区目录名<input id="new-project-id" maxlength="80" placeholder="留空使用工程名称；支持中文"></label>
+      <div class="field-row"><label class="field">画布宽度<input id="new-project-width" type="number" min="1" max="4096" value="640" required></label><label class="field">画布高度<input id="new-project-height" type="number" min="1" max="4096" value="640" required></label></div>
+      <div class="field-row"><label class="field">锚点 X（0–1）<input id="new-project-anchor-x" type="number" min="0" max="1" step="any" value="0.5" required></label><label class="field">锚点 Y（0–1）<input id="new-project-anchor-y" type="number" min="0" max="1" step="any" value="0.9" required></label></div>
+      <p id="project-create-error" class="error-panel" hidden role="alert"></p>
+      <button id="project-create" type="submit" class="primary wide">创建并打开</button>
+    </form>
+  </dialog>
   <dialog id="export-dialog">
     <form id="export-form"><div class="dialog-heading"><div><span class="eyebrow">EXPORT</span><h2>导出资源</h2></div><button type="button" id="export-close" class="icon-button" aria-label="关闭导出">×</button></div>
       <p class="muted">根据当前草稿生成。不会覆盖工程中的已有导出文件。</p>

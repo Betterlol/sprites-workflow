@@ -32,6 +32,11 @@ export class Player {
     }
     return this.images.get(url);
   }
+  reset() {
+    this.pause(); this.loadEpoch++; this.images.clear(); this.steps = [];
+    this.index = 0; this.elapsed = 0; this.sourceView = null; this.idle = null; this.assets = new Map();
+    this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
   setProject(data, assets) {
     this.size = data.frame_size;
     this.anchor = data.anchor.pixels;

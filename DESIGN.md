@@ -2,6 +2,8 @@
 
 ### 本地网页工作台
 
+工程管理统一以 `workspaces/<目录名>/pipeline.json` 为入口，默认先展示工程列表，支持创建空工程、切换和显式 `--config` 打开旧布局。网页请求始终携带工程 ID，没有服务端全局当前工程。工程创建和操作通过共享领域逻辑供网页与 `tools/projects.py` 使用；配置版本和素材版本分别检测，网页与 CLI 共用跨进程锁。现有 `assets/` 不自动迁移。
+
 现有 CLI 继续保留，新增 `tools/serve_sprites.py` 启动同源的本地 FastAPI 服务与浏览器界面。前端使用原生 ES modules 和 Canvas 2D，无前端构建依赖。
 
 网页工作流为：原图 → 内存切图 / 参数预览 → 明确应用到 processed → 动作引用与 Review 编排 → 按需导出。
