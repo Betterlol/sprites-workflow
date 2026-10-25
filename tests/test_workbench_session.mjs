@@ -73,7 +73,7 @@ class Player {
   setProject(data) { this.size = data.frame_size; this.anchor = data.anchor.pixels; }
   setSteps(steps,index = 0) { this.steps = steps; this.index = index; this.onStep(index); }
 }
-const snapshot = id => ({data:{version:2,project:{name:id},character:id,frame_size:[32,32],anchor:{pixels:[16,29]},defaults:{},sources:{},actions:{},workbench:{reviews:{}}},
+const snapshot = id => ({data:{version:2,project:{name:id},character:id,frame_size:[32,32],anchor:{x:0.5,y:0.90625,pixels:[16,29]},defaults:{},sources:{},actions:{},workbench:{reviews:{}}},
   revision:'r-' + id,asset_revision:'a-' + id,sources:[],assets:[],references:[],legacy_count:0,project:{id,name:id,directory:'/workspaces/' + id},warnings:[]});
 const projects = new Map([['alpha',snapshot('alpha')],['beta',snapshot('beta')]]);
 const requests = [];
@@ -292,4 +292,25 @@ await elements.get('export-form').onsubmit({preventDefault() {}});
 assert(requests.some(request => request.url.endsWith('/jobs/export')),'Export must start a progress job');
 assert(requests.some(request => request.url.endsWith('/jobs/job-1/download')),'Completed job must download its ZIP');
 assert(!elements.get('export-dialog').open);
+await openProject('beta');
+const settingsRevision = state.revision;
+projects.get('beta').data.frame_size = [64,64];
+projects.get('beta').data.anchor.pixels = [32,58];
+projects.get('beta').revision = 'disk-settings';
+pausedProject = 'beta'; resumeSnapshot = null;
+const pendingSettingsRefresh = checkExternalChanges(); await flush();
+assert.equal(typeof resumeSnapshot,'function');
+elements.get('settings-open').onclick();
+elements.get('settings-name').value = 'Local rename';
+pausedProject = null; resumeSnapshot(); await pendingSettingsRefresh;
+await checkExternalChanges();
+assert.equal(state.revision,settingsRevision,'Open settings must not adopt a newer disk revision behind the form');
+assert.equal(elements.get('settings-name').value,'Local rename');
+elements.get('settings-form').onsubmit({preventDefault() {}});
+assert.equal(state.data.project.name,'Local rename');
+assert(dirty());
+assert.equal(projects.get('beta').revision,'disk-settings');
+await save();
+assert(dirty(),'A stale settings form must encounter a revision conflict');
+assert.deepEqual(projects.get('beta').data.frame_size,[64,64],'External canvas changes must survive');
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');

@@ -2,6 +2,15 @@
 const MISSING = Symbol('missing');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const copy = value => value === MISSING ? MISSING : structuredClone(value);
+const rounded = value => { const floor = Math.floor(value); return value - floor === .5 ? floor + floor % 2 : Math.round(value); };
+function derivePixels(config) {
+  if (Array.isArray(config?.frame_size) && config.anchor &&
+      Number.isFinite(config.anchor.x) && Number.isFinite(config.anchor.y)) {
+    config.anchor.pixels = [rounded(config.frame_size[0] * config.anchor.x),
+      rounded(config.frame_size[1] * config.anchor.y)];
+  }
+  return config;
+}
 
 function equal(left, right) {
   if (left === MISSING || right === MISSING) return left === right;
@@ -21,6 +30,7 @@ export const conflictKey = path => path.map(key => String(key).replaceAll('~','~
 export function mergeDraft(base, local, disk) {
   const conflicts = [];
   function visit(before, ours, theirs, path) {
+    if (path.length === 2 && path[0] === 'anchor' && path[1] === 'pixels') return MISSING;
     if (equal(ours,theirs)) return copy(ours);
     if (equal(ours,before)) return copy(theirs);
     if (equal(theirs,before)) return copy(ours);
@@ -40,7 +50,7 @@ export function mergeDraft(base, local, disk) {
       localMissing:ours === MISSING,diskMissing:theirs === MISSING});
     return copy(ours);
   }
-  return {merged:visit(base,local,disk,[]),conflicts};
+  return {merged:derivePixels(visit(base,local,disk,[])),conflicts};
 }
 
 export function resolveMerge(proposal, choices = {}) {
@@ -55,5 +65,5 @@ export function resolveMerge(proposal, choices = {}) {
     if (value === MISSING) delete parent[key];
     else Object.defineProperty(parent,key,{value,configurable:true,writable:true,enumerable:true});
   }
-  return result;
+  return derivePixels(result);
 }

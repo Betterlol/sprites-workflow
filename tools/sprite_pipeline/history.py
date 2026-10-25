@@ -23,6 +23,10 @@ class HistoryConflictError(ValueError):
     """The files to restore no longer match the completed operation."""
 
 
+class OperationNotStarted(FileExistsError):
+    """An exclusive file creation failed before this transaction changed any file."""
+
+
 class ProjectHistory:
     def __init__(self, project_root: Path):
         self.project_root = project_root.resolve()
@@ -123,6 +127,10 @@ class ProjectHistory:
                             "roots": roots, "before": before, "after": after}
                 (pending / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
                 pending.replace(self.versions / version_id)
+            except OperationNotStarted:
+                # Another writer owns the destination. Rolling back the
+                # before/after difference would remove that writer's file.
+                raise
             except BaseException:
                 try:
                     self._restore_archive(archive_path, before, roots)

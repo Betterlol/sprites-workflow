@@ -53,6 +53,13 @@ assert.deepEqual(resolved.actions.idle.sprites,['b','a']);
 assert.equal(resolved.remove,null,'Explicit null differs from deletion');
 const unusualKey = mergeModule.mergeDraft({},JSON.parse('{"__proto__":{"safe":true}}'),{other:1});
 assert.equal(Object.hasOwn(unusualKey.merged,'__proto__'),true,'Own config keys must survive a merge');
+const settingsBase = {frame_size:[32,32],anchor:{x:0.5,y:0.5,pixels:[16,16]}};
+const settingsLocal = {frame_size:[64,64],anchor:{x:0.5,y:0.5,pixels:[32,32]}};
+const settingsDisk = {frame_size:[32,32],anchor:{x:0.25,y:0.5,pixels:[8,16]}};
+const settingsMerge = mergeModule.mergeDraft(settingsBase,settingsLocal,settingsDisk);
+assert.equal(settingsMerge.conflicts.length,0,'Derived anchor pixels cannot create a false conflict');
+assert.deepEqual(mergeModule.resolveMerge(settingsMerge).anchor.pixels,[16,32],
+  'Merged pixels must be derived from the resolved canvas and normalized anchor');
 const playerSource = await readFile(new URL('../tools/sprite_pipeline/web/player.js',import.meta.url),'utf8');
 const {Player} = await import('data:text/javascript;base64,' + Buffer.from(playerSource).toString('base64'));
 let imageCount = 0;

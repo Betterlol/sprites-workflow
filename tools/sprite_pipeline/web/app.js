@@ -181,12 +181,12 @@ async function refreshExternal() {
 
 let checkingDisk = false;
 async function checkExternalChanges() {
-  if (checkingDisk || state.busy || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#export-dialog').open || $('#merge-dialog').open) return;
+  if (checkingDisk || state.busy || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#settings-dialog').open || $('#export-dialog').open || $('#merge-dialog').open) return;
   checkingDisk = true;
   const projectId = state.projectId;
   try {
     const changes = await api('changes');
-    if (projectId !== state.projectId || state.busy) return;
+    if (projectId !== state.projectId || state.busy || $('#settings-dialog').open) return;
     if (changes.revision === state.revision && changes.asset_revision === state.assetRevision) {
       if (state.externalChange) { state.externalChange = false; $('#external-change').hidden = true; updateSaveStatus(); }
       return;
@@ -197,7 +197,7 @@ async function checkExternalChanges() {
     else {
       const snapshot = await api('project');
       // A user may have edited or switched projects while the request was in flight.
-      if (projectId === state.projectId && !state.busy && !dirty()) { player.pause(); setSnapshot(snapshot); }
+      if (projectId === state.projectId && !state.busy && !dirty() && !$('#settings-dialog').open) { player.pause(); setSnapshot(snapshot); }
     }
   } catch (error) {
     if (projectId === state.projectId) showExternalChange('无法读取磁盘工程：' + error.message);

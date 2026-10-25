@@ -25,7 +25,7 @@ from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_dat
 from .export import pack_action, preview_action, update_manifest
 from .extract import cut_frames, preserve_slice_ids, previous_slices
 from .files import numbered_frames, read_image, replace_frames, write_json
-from .history import HistoryConflictError, ProjectHistory
+from .history import HistoryConflictError, OperationNotStarted, ProjectHistory
 from .process import process_images
 from .locking import project_lock
 
@@ -469,7 +469,11 @@ class Project:
             with self.history_transaction("upload " + kind, [self.path, destination]):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 # Exclusive creation also avoids races with external import tools.
-                with destination.open("xb") as output:
+                try:
+                    output = destination.open("xb")
+                except FileExistsError as error:
+                    raise OperationNotStarted("An image with this filename already exists; rename the import") from error
+                with output:
                     output.write(content)
                 write_json(self.path, cfg.data)
             return self.state()

@@ -83,6 +83,23 @@ class ProjectWorkflowTests(unittest.TestCase):
         self.assertEqual(len(response.json()["assets"]), 1)
         self.assertFalse((self.root / "fish" / "exports").exists())
 
+    def test_upload_exclusive_create_race_preserves_external_file(self):
+        snapshot = self.create()
+        destination = self.root / "fish/source/pose.png"
+        external = png_bytes(Image.new("RGBA", (16, 16), "blue"))
+        original_open = Path.open
+
+        def race_open(path, mode="r", *args, **kwargs):
+            if path == destination and mode == "xb":
+                destination.write_bytes(external)
+            return original_open(path, mode, *args, **kwargs)
+
+        with patch.object(Path, "open", race_open):
+            response = self.import_image(snapshot)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(destination.read_bytes(), external)
+        self.assertEqual(self.client.get("/api/projects/fish/history").json()["versions"], [])
+
     def test_processed_only_project_and_portable_backup_keep_reference_material(self):
         snapshot = self.create()
         response = self.import_image(snapshot, kind="processed")
