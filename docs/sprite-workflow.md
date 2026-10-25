@@ -2,6 +2,8 @@
 
 命令行负责可独立运行的 extract、process、select、pack / preview 阶段；网页工作台提供同一套处理能力的交互入口。启动和命令示例见 [README](../README.md)，网页说明见 [workbench.md](workbench.md)。
 
+Agent 制作动作必须先遵循 [制作与验收流程](agent-sprite-workflow.md)。本文描述配置和构建阶段；IDLE 基准、实际播放边界、过渡生成与视觉验收记录不能由构建命令代替，也不要求新增配置字段。
+
 ## 配置
 
 `pipeline.json` 使用 version 2；所有相对路径以此文件为基准。`paths.source` 指向原图，其他阶段目录位于输出根目录内且互不重叠。

@@ -2,6 +2,8 @@
 
 每个直接子目录是一份独立工程，目录中的 `pipeline.json` 是识别入口。文件夹可以整体复制或备份；工程列表每次刷新直接扫描磁盘，不依赖额外注册表。
 
+Agent 操作素材前，必须读取 [制作与验收流程](../docs/agent-sprite-workflow.md)、目标工程 `README.md` 和当前配置，再用 `tools/projects.py status <project-id>` 核对实际引用。工程说明必须记录唯一 IDLE 基准、子动作实际边界、完整动作组成和验收结论，模板见该流程。说明与配置不一致时先记录差异；文档任务不得顺带调整素材或动作配置。
+
 | 路径 | 约定 |
 | --- | --- |
 | `pipeline.json` | 共享配置：展示名称、画布、锚点、切图与处理规则、动作引用和 Review |
@@ -11,7 +13,7 @@
 | `processed_sprites/imports/` | 兼容已有的人工修图或外部处理帧；不作为新素材的常规入口 |
 | `processed_sprites/_approved/` | 已确认的历史最终帧 |
 | `references/` | 用户初始参考图、确认后的 idle 基准图及必要记录；不放候选图和迭代图，也不参与自动切图 |
-| `README.md` | 工程说明、角色约束和待办 |
+| `README.md` | 工程说明、IDLE 基准、角色约束、子动作边界、完整编排、验收记录和待办 |
 | `exports/` | CLI 按需生成的帧、图集、预览、元数据和 manifest；Git 默认忽略 |
 
 工程名称与目录名支持中文。创建时目录名留空则使用名称；目录名须符合 Windows 文件名约束，大小写不同也视为重名。`project.name` 是展示名，可在配置中修改；`character` 是交付文件中的英文标识。目录名不满足英文标识要求时，创建器会生成稳定的 `character`。目录名是网页 URL 使用的工程标识，不要在网页编辑中途直接搬动目录。
@@ -28,9 +30,12 @@ python tools/projects.py validate dafeiyu
 python tools/projects.py import dafeiyu --kind source --file path/to/idle.png
 python tools/projects.py apply dafeiyu --source idle.png
 python tools/projects.py prepare dafeiyu
-python tools/projects.py import dafeiyu --kind processed --file path/to/fixed.png
-python tools/projects.py import dafeiyu --kind processed --file path/to/a.png --file path/to/b.png
+# 新修图同样先导入 source，再处理；不是直接导入 processed
+python tools/projects.py import dafeiyu --kind source --file path/to/fixed.png
+python tools/projects.py apply dafeiyu --source fixed.png
+python tools/projects.py import dafeiyu --kind source --file path/to/action_a.png --file path/to/action_b.png
 python tools/projects.py import dafeiyu --kind reference --file path/to/identity.png --file path/to/style.png
+# 以下删除示例仅针对已有兼容素材；不要为套用示例创建或删除真实素材
 python tools/projects.py delete dafeiyu --kind processed --ref imports/a.png --ref imports/b.png
 python tools/projects.py delete dafeiyu --kind source --ref unused.png
 python tools/projects.py delete dafeiyu --kind reference --ref references/style.png
@@ -51,6 +56,8 @@ python tools/projects.py save dafeiyu --data path/to/pipeline-draft.json --revis
 
 `import` 可重复传入 `--file`，返回 `imported`、`failed` 和 `skipped`，失败时退出码非零；已成功的导入会保留，普通单张错误不阻断后续图片。`delete` 同样支持版本参数，可重复传入 `--ref`；正在被动作使用的素材会阻止整批删除。删除原图同时删除对应切片和 processed；删除生成的单帧不会永久改变切图规则，之后应用可能重新生成。删除没有网页撤销，文件写入失败会回滚已移动的内容。
 
+`import --kind processed` 仍支持历史外部帧兼容，但不作为 Agent 新原画或新单帧修复的常规入口。新素材必须保留 source 来源。
+
 新工程使用 `references/`；旧 `reference/` 继续读取和备份，不自动重命名。参考图的 `--ref` 包含目录前缀，例如 `references/identity.png`；source 的引用相对 `source/`，processed 的引用相对 `processed_sprites/`。
 
 分阶段构建仍可使用：
@@ -68,11 +75,12 @@ python tools/build_sprites.py pack --config workspaces/dafeiyu/pipeline.json
 
 ## 人与 Agent 协作
 
-1. 双方共用磁盘文件。用户参考图和确认后的 idle 基准图放 `references/`；后续动作优先以该 idle 为形象、大小和色彩基准。不要把参考图放进原图扫描目录。
+1. 双方共用磁盘文件。用户参考图和确认后的 idle 基准图放 `references/`，在工程说明中绑定精确路径、来源和尺度约束；生成时实际提供该 idle 和所需边界图片。不要把参考图放进原图扫描目录。
 2. 候选图和迭代文件放在独立工作目录（如工程内 `_work/<task>/`），不要堆在 `references/` 或 `source/`。确认采用的原画先导入 `source/`，包括单帧修复，再按规则切图、处理；不要为调整动作顺序重命名素材编号。
 3. 网页、管理 CLI、分阶段 CLI 共用 `.sprite-workbench.lock`。锁文件会保留，实际锁由系统随进程释放，不需要手动删除。
 4. 直接写文件不会自动遵守锁。优先使用管理 CLI；必须手工修改时先写临时文件再替换，并刷新网页确认外部变化。两边不要同时编辑同一配置。
 5. 网页有草稿时不会静默覆盖；图片变化可刷新素材，配置冲突可先下载草稿再合并。
 6. 提交或备份配置、source、processed、references 和说明。缓存与导出可以重建；人工修图不能按缓存清理。
+7. 子动作、局部接缝 Review 与完整动作使用相同的实际边界和运行时节奏，记录去重与停顿。按制作流程核对展开后的引用与时长，再逐段、逐缝和全段检查。素材、参数或编排变化后重新验收受影响范围，不能以配置校验或导出成功代替视觉检查。
 
 已有 `assets/` 由用户自行整理，程序不做自动迁移。旧目录可用 `python tools/serve_sprites.py --config <原pipeline.json>` 显式打开。工作区列表中的工程要求 source 位于本工程内。

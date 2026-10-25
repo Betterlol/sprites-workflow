@@ -2,6 +2,16 @@
 
 将 Agent 生成的原始图片切成单帧，统一处理后，通过配置组装动作，导出游戏图集和展示动画。
 
+## Agent 制作入口（必读）
+
+制作、扩展或修复动作前，先读 [AGENTS.md](AGENTS.md)、[工作区说明](workspaces/README.md)、[Agent Sprite 制作与验收流程](docs/agent-sprite-workflow.md)，再读目标工程的 `README.md` 和 `pipeline.json`，用 `tools/projects.py status <project-id>` 核对现状。架构说明见 [DESIGN.md](DESIGN.md)。
+
+强制顺序为：**绑定已确认的 IDLE 基准 → 规划子动作及实际播放边界 → 以 IDLE 和边界图片约束整张 spritesheet → 导入采用的原画并处理 → 检查每个子动作及接缝 → 核对完整动作编排并验收**。
+
+IDLE 固定形象、比例与视觉尺度；前后边界帧固定姿态、运动和道具状态。直接共享的边界默认只播放一次；不能直接衔接时，以实际采用的前段末帧和后段入口帧生成整张过渡图，再切图并检查两端。单帧生成只修复明确坏帧。完整动作和 Review 必须使用相同的引用、实际边界和运行时节奏，并以正常速度、慢放和逐帧检查通过为完成条件。
+
+基准、来源、选帧范围、取舍和验收版本必须记录在工程说明中；模板见上述流程，任务与生成提示词见 [示例](docs/prompt-sample.md)。配置校验或成功导出不代表动作已通过视觉验收。这些是 Agent 的制作职责，工作台尚未自动强制检查。文档任务不改动现有素材或动作配置。
+
 ## 浏览器动作工作台
 
 ```powershell
@@ -74,7 +84,7 @@ python tools/projects.py apply dafeiyu --source idle.png
 # 切出全部原图的单帧，检查 source_sprites/
 python tools/build_dafeiyu_sprites.py extract
 
-# 生成处理结果，检查 processed_sprites/
+# 分阶段处理会覆盖对应 processed；Agent 常规制作优先使用 projects.py apply
 python tools/build_dafeiyu_sprites.py process
 
 # 确认配置中的选帧顺序后，发布到 exports/frames/
@@ -103,7 +113,7 @@ python tools/build_dafeiyu_sprites.py pack --no-preview
 python tools/build_dafeiyu_sprites.py build
 ```
 
-无参数运行等价于 pack。人工修改 processed_sprites 后从 select 继续，修改最终 frames 后从 pack 继续；build 会重新生成中间素材和最终帧。
+无参数运行等价于 pack。历史上已手工修改的 processed 可从 select 继续，已有最终 frames 的修图可从 pack 继续；新修图必须按 Agent 流程先导入 source 再处理。build 会重新生成中间素材和最终帧，不作为 Agent 常规增量制作入口。
 
 其他角色使用通用入口，例如：
 
