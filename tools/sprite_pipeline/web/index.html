@@ -40,8 +40,14 @@
       <button data-mode="review" role="tab" aria-selected="false"><span>03</span> 衔接 Review</button>
       <button data-mode="reference" role="tab" aria-selected="false"><span>04</span> 参考图</button>
     </div>
-    <span id="save-status" class="save-status" role="status">工程载入中</span>
+    <span id="save-status" class="save-status">工程载入中</span>
   </nav>
+
+  <div id="workflow-status" class="workflow-status" role="status" aria-live="polite" aria-atomic="true">
+    <span id="draft-state" data-state="quiet">工程：载入中</span>
+    <span id="preview-state" data-state="quiet">处理预览：未选择原图</span>
+    <span id="material-state" data-state="quiet">素材：载入中</span>
+  </div>
 
   <main class="workspace">
     <aside class="sidebar">

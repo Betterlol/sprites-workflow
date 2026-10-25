@@ -145,17 +145,19 @@ const context = {
 };
 let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import.meta.url),'utf8');
 source = source.replace(/^import .*\n/gm,'');
-source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory};';
+source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';
 vm.runInNewContext(source,context,{filename:'app.js'});
 const flush = () => new Promise(resolve => setImmediate(resolve));
 await flush();
-const {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player} = context.hooks;
+const {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,renderAll} = context.hooks;
 assert(intervals.includes(12000),'Background checks should use a longer idle interval');
 assert(body.classList.contains('project-home'));
 assert.match(elements.get('project-list').innerHTML,/alpha/);
 await openProject('alpha');
 assert.equal(state.projectId,'alpha'); assert(!body.classList.contains('project-home'));
 assert.equal(elements.get('project-name').textContent,'alpha',elements.get('toast').textContent);
+assert(elements.get('draft-state'),'The workbench needs a visible draft state');
+assert.match(elements.get('draft-state').textContent,/已保存/);
 
 state.data.notes = ['human draft'];
 projects.get('alpha').asset_revision = 'new-pixels';
@@ -258,7 +260,11 @@ state.source = 'sheet.png'; mode('source');
 await previewSource(); await previewSource();
 assert.equal(previewRequests.filter(source => source === 'sheet.png').length,1,'Unchanged preview should be reused');
 state.data.sources['sheet.png'].process = {offset:[1,0]};
+renderAll();
+assert.match(elements.get('draft-state').textContent,/待保存/);
+assert.match(elements.get('preview-state').textContent,/待预览|待应用/);
 await previewSource();
+assert.match(elements.get('preview-state').textContent,/待应用/);
 assert.equal(previewRequests.filter(source => source === 'sheet.png').length,2,'Recipe edits need a fresh preview');
 state.source = 'slow.png'; const slowPreview = previewSource(); await flush();
 state.source = 'fast.png'; await previewSource();
@@ -293,6 +299,12 @@ assert(requests.some(request => request.url.endsWith('/jobs/export')),'Export mu
 assert(requests.some(request => request.url.endsWith('/jobs/job-1/download')),'Completed job must download its ZIP');
 assert(!elements.get('export-dialog').open);
 await openProject('beta');
+state.sources = [{file:'sheet.png',url:'/sources/sheet.png',size:[16,16],stale:false}];
+projects.get('beta').sources = [{file:'sheet.png',url:'/sources/sheet.png',size:[16,16],stale:true}];
+state.data.project.name = 'Metadata refresh';
+await save();
+assert.match(elements.get('material-state').textContent,/1 张待更新/,
+  'Saving a recipe must refresh stale material labels without applying images');
 const settingsRevision = state.revision;
 projects.get('beta').data.frame_size = [64,64];
 projects.get('beta').data.anchor.pixels = [32,58];

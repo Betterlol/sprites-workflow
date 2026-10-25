@@ -14,3 +14,33 @@
 #merge-dialog{width:min(780px,calc(100vw - 28px));max-height:85vh;overflow:auto}.merge-conflicts{display:grid;gap:12px;margin:16px 0}.merge-conflict{padding:13px;border:1px solid var(--border);border-radius:6px;background:var(--panel2)}.merge-conflict h3{margin:0 0 10px;font-size:13px;overflow-wrap:anywhere}.merge-values{display:grid;grid-template-columns:1fr 1fr;gap:10px}.merge-values>div{min-width:0}.merge-values strong{font-size:11px}.merge-values pre{max-height:150px;overflow:auto;padding:9px;background:var(--bg);border:1px solid var(--border);border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}.merge-conflict label{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px}@media(max-width:540px){.merge-values{grid-template-columns:1fr}}
 .export-progress{display:grid;gap:8px;margin:14px 0;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--panel2)}.export-progress p{margin:0;font-size:12px}.export-progress progress{width:100%;accent-color:var(--accent)}.export-progress button{justify-self:end}
 .job-banner{display:flex;align-items:center;gap:12px;padding:8px 22px;border-bottom:1px solid var(--border);background:var(--panel2);font-size:12px}.job-banner span{min-width:0;flex:1}.job-banner progress{width:min(260px,30vw);accent-color:var(--accent)}@media(max-width:540px){.job-banner{flex-wrap:wrap;padding:8px 12px}.job-banner span{flex-basis:100%}.job-banner progress{flex:1;width:auto}}
+
+/* The editor is a work surface: legible controls and quiet, explicit state. */
+:root{--panel2:#242a34;--border:#39414f;--muted:#b4becb;font-size:14px}
+button{min-height:36px;font-size:12px;line-height:1.25}
+.icon-button{min-width:36px;min-height:36px}
+.text-button{min-height:32px;font-size:12px}
+input,select,textarea{font-size:13px;min-height:36px}
+input[type=checkbox],input[type=range]{min-height:0}
+.hint,.muted{font-size:12px;line-height:1.55}
+.eyebrow{font-size:11px;letter-spacing:.35px}
+.panel-heading{height:56px;min-height:56px}
+.panel-heading h1,.panel-heading h2,.library-heading h2{font-size:13px}
+.item-row{font-size:12px;min-height:40px}
+.item-row small{font-size:11px}
+.library-filters input,.library-filters select,.library-selection,.selection-actions{font-size:12px}
+.library-selection .text-button,.selection-actions .text-button,.sidebar-footer button{font-size:12px;min-height:32px}
+.asset-card span{font-size:11px}
+.inspector-section h3,.field,.field-inline,.info-row,.transport label,.timeline-heading h2{font-size:12px}
+.inspector .hint,.inspector .muted,.field textarea,.timeline-help,.timeline-footer{font-size:11px}
+.mode-tabs button{font-size:12px}
+.save-status{font-size:12px}
+.canvas-toolbar strong{font-size:14px}
+.canvas-toolbar .view-controls label,.canvas-toolbar .view-controls select{font-size:11px}
+.timeline-card .frame-caption,.timeline-card .clip-name{font-size:11px}
+.workflow-status{display:flex;align-items:center;gap:8px;flex-shrink:0;padding:7px 20px;border-bottom:1px solid var(--border);background:#151a21}
+.workflow-status span{display:inline-flex;align-items:center;min-height:29px;padding:4px 10px;border:1px solid var(--border);border-left:3px solid var(--muted);border-radius:4px;background:var(--panel);color:var(--muted);font-size:12px;line-height:1.35}
+.workflow-status [data-state=ready]{border-left-color:var(--accent);color:var(--text)}
+.workflow-status [data-state=pending]{border-left-color:var(--orange);color:#f1cd9a}
+.workflow-status [data-state=error]{border-left-color:var(--danger);color:#ffb9b9}
+@media(prefers-reduced-motion:reduce){button{transition:none}}

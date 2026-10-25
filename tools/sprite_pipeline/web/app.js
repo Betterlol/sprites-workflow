@@ -11,7 +11,7 @@ const info = (key, value) => `<div class="info-row"><span>${key}</span><strong>$
 const section = (title, body) => `<section class="inspector-section"><h3>${title}</h3>${body}</section>`;
 const state = {mode:'action', data:null, revision:null, token:null, assets:[], sources:[], references:[], action:null, source:null, review:null, reference:null,
   selected:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewError:null,
-  history:[], future:[], saved:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false,
+  history:[], future:[], saved:null, savedData:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false,
   assetSelection:new Set(), libraryMulti:false, lastAsset:null};
 let previewTimer, toastTimer, previewRequest;
 let mergeContext;
@@ -54,9 +54,24 @@ function sourceInfo() { return state.sources.find(source => source.file === stat
 function referenceInfo() { return state.references.find(image => image.ref === state.reference); }
 function asset(ref) { return state.assets.find(item => item.ref === ref); }
 function dirty() { return state.data && JSON.stringify(state.data) !== state.saved; }
+function sourceRecipe(data, source) {
+  return [data?.frame_size,data?.anchor,data?.defaults?.extract,data?.defaults?.process,data?.sources?.[source]];
+}
 function updateSaveStatus() {
-  $('#save-status').textContent = state.busy ? '正在处理…' : state.externalChange ? '● 磁盘内容已变化' : dirty() ? '● 有未保存的更改' : '✓ 工程已保存';
-  $('#save-status').classList.toggle('dirty', !!dirty());
+  const draft = !!dirty();
+  $('#save-status').textContent = state.busy ? '正在处理…' : state.externalChange ? '● 磁盘内容已变化' : draft ? '● 有未保存的更改' : '✓ 工程已保存';
+  $('#save-status').classList.toggle('dirty', draft);
+  $('#draft-state').textContent = state.externalChange ? '工程：磁盘有新修改' : draft ? '工程：草稿待保存' : '工程：已保存';
+  $('#draft-state').dataset.state = state.externalChange || draft ? 'pending' : 'ready';
+  const sourceChanged = state.mode === 'source' && state.source && state.savedData &&
+    JSON.stringify(sourceRecipe(state.data,state.source)) !== JSON.stringify(sourceRecipe(state.savedData,state.source));
+  const preview = state.mode !== 'source' || !state.source ? '未选择原图' : state.previewError ? '预览失败' :
+    sourceChanged ? (state.preview && state.previewSource === state.source ? '预览待应用' : '参数待预览') : '当前参数';
+  $('#preview-state').textContent = `处理预览：${preview}`;
+  $('#preview-state').dataset.state = state.previewError ? 'error' : sourceChanged ? 'pending' : 'quiet';
+  const stale = state.sources.filter(source => source.stale).length;
+  $('#material-state').textContent = stale ? `素材：${stale} 张待更新` : '素材：已同步';
+  $('#material-state').dataset.state = stale ? 'pending' : 'ready';
   $('#undo').disabled = !state.history.length; $('#redo').disabled = !state.future.length;
   $('#save').disabled = state.busy || !dirty();
   $('#prepare').disabled = state.busy || !state.sources.length;
@@ -78,7 +93,7 @@ function setSnapshot(snapshot) {
   state.data = snapshot.data; state.revision = snapshot.revision; state.assets = snapshot.assets; state.sources = snapshot.sources;
   state.references = snapshot.references || []; reconcileMaterials();
   state.assetRevision = snapshot.asset_revision; state.externalChange = false; $('#external-change').hidden = true; $('#external-merge').hidden = true;
-  state.token = snapshot.token || state.token; state.saved = JSON.stringify(snapshot.data);
+  state.token = snapshot.token || state.token; state.saved = JSON.stringify(snapshot.data); state.savedData = clone(snapshot.data);
   state.legacyCount = snapshot.legacy_count; state.history = []; state.future = [];
   state.action = state.data.actions[state.action] ? state.action : Object.keys(state.data.actions)[0];
   state.review = reviews()[state.review] ? state.review : Object.keys(reviews())[0];
@@ -146,7 +161,7 @@ async function showProjects() {
   if (state.busy || (dirty() && !confirm('返回工程列表会放弃当前未保存的草稿。继续？'))) return;
   await task('正在读取工程…',async () => {
     await listProjects(); clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
-    player.reset(); state.data = null; state.saved = null; state.projectId = null;
+    player.reset(); state.data = null; state.saved = null; state.savedData = null; state.projectId = null;
     state.externalChange = false; $('#external-change').hidden = true;
     document.body.classList.add('project-home'); $('#project-name').textContent = '工程列表';
     history.replaceState(null,'',location.pathname);
@@ -266,7 +281,16 @@ window.addEventListener('focus',checkExternalChanges);
 setInterval(checkExternalChanges,12000);
 async function save() {
   return task('正在保存工程…', async () => {
-    const result = await api('save', payload()); state.revision = result.revision; state.saved = JSON.stringify(state.data); toast('工程已保存');
+    const result = await api('save', payload());
+    state.revision = result.revision; state.saved = JSON.stringify(state.data); state.savedData = clone(state.data);
+    try {
+      const snapshot = await api('project');
+      if (snapshot.revision === state.revision && snapshot.asset_revision === state.assetRevision) {
+        state.sources = snapshot.sources; state.assets = snapshot.assets; state.references = snapshot.references || [];
+        state.legacyCount = snapshot.legacy_count; reconcileMaterials(); renderAll();
+      }
+      toast('工程已保存');
+    } catch (error) { toast('工程已保存，但素材状态暂未刷新：' + error.message,true); }
   });
 }
 function mode(value) {
@@ -656,7 +680,7 @@ function previewKey(source) {
 function showPreview(result, source) {
   state.preview = result; state.previewSource = source; state.previewError = null;
   state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
-  if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); }
+  if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus(); }
   $('#status-message').textContent = `处理预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
 }
 async function previewSource(force = false) {
@@ -682,7 +706,7 @@ async function previewSource(force = false) {
     if (error.name === 'AbortError') return;
     if (epoch !== state.previewEpoch) return;
     state.previewError = error.message;
-    if (state.mode === 'source') renderInspector();
+    if (state.mode === 'source') { renderInspector(); updateSaveStatus(); }
     $('#status-message').textContent = '预览失败：' + error.message;
   } finally { if (previewRequest === request) previewRequest = null; }
 }
