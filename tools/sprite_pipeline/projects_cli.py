@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--kind", choices=("source", "processed", "reference"), required=True)
             command.add_argument("--ref", action="append", required=True, dest="references", help="Repeat to delete a batch; in-use sprites are protected")
         if name == "export":
-            command.add_argument("--format", choices=("project", "frames", "atlas", "webp", "all"), default="project")
+            command.add_argument("--format", choices=("project", "frames", "atlas", "webp", "gif", "all"), default="project")
             command.add_argument("--action", action="append", dest="actions")
             command.add_argument("--exclude-action", action="append", dest="exclude_actions",
                                  help="Exclude an action after --action selection; repeatable; resource exports only")
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
                 elif args.command == "export":
                     if args.format == "project":
                         if args.exclude_actions:
-                            raise ValueError("--exclude-action is not supported for project backups; choose frames, atlas, webp or all")
+                            raise ValueError("--exclude-action is not supported for project backups; choose frames, atlas, webp, gif or all")
                         actions = args.actions or list(cfg.data["actions"])
                     else:
                         actions = cfg.select_actions(args.actions, args.exclude_actions)

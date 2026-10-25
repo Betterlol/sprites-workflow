@@ -70,13 +70,13 @@ class CliActionFilterTests(unittest.TestCase):
         return {
             action for action in self.cfg.data["actions"]
             if any(name.startswith(f"sprites/{action}/") or name in {
-                f"spritesheets/fish_{action}.png", f"webp/fish_{action}.webp",
+                f"spritesheets/fish_{action}.png", f"webp/fish_{action}.webp", f"gif/fish_{action}.gif",
                 f"metadata/fish_{action}.json",
             } for name in names)
         }
 
     def test_project_export_excludes_repeated_actions_in_all_resource_formats(self):
-        for format in ("frames", "atlas", "webp", "all"):
+        for format in ("frames", "atlas", "webp", "gif", "all"):
             with self.subTest(format=format):
                 output = self.root / f"{format}.zip"
                 status, _, error = self.export(

@@ -135,6 +135,23 @@ class WorkbenchTests(unittest.TestCase):
                 self.assertEqual(preview.info["duration"], duration)
         self.assertEqual(before, {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
 
+    def test_gif_export_uses_display_order_without_changing_project_art(self):
+        self.apply()
+        before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        self.data["actions"]["walk"]["animation"] = {"order": [2, 0, 1], "durations_ms": [40, 120, 80], "loop": 2}
+        response = self.post("export", options={"format": "gif", "actions": ["walk"]})
+        self.assertEqual(response.status_code, 200, response.text[:100])
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertIn("gif/test_walk.gif", archive.namelist())
+            self.assertNotIn("webp/test_walk.webp", archive.namelist())
+            with Image.open(io.BytesIO(archive.read("gif/test_walk.gif"))) as gif:
+                self.assertEqual(gif.n_frames, 3)
+                self.assertEqual(gif.info["loop"], 1)
+                for index, duration in enumerate((40, 120, 80)):
+                    gif.seek(index)
+                    self.assertEqual(gif.info["duration"], duration)
+        self.assertEqual(before, {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
+
     def test_review_uses_bounded_repeats_even_when_action_loops_forever(self):
         self.apply()
         cfg = load_config(self.path)
@@ -148,6 +165,9 @@ class WorkbenchTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             self.assertEqual(len(json.loads(archive.read("review.animation.json"))["steps"]), 5)
             self.assertIn("review.webp", archive.namelist())
+            with Image.open(io.BytesIO(archive.read("review.gif"))) as gif:
+                self.assertEqual(gif.n_frames, 5)
+                self.assertEqual(gif.info["loop"], 0)
 
     def test_export_reports_completed_actions_and_cancels_before_next_action(self):
         self.apply()

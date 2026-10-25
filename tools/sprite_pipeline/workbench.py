@@ -22,11 +22,12 @@ from PIL import Image
 
 from .animation import playback
 from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_data, inside, integer, load_config, source_fingerprint
-from .export import pack_action, preview_action, update_manifest
+from .export import pack_action, preview_action, preview_gif, update_manifest
 from .extract import cut_frames, preserve_slice_ids, previous_slices
 from .files import numbered_frames, read_image, replace_frames, write_json
 from .history import HistoryConflictError, OperationNotStarted, ProjectHistory
 from .process import process_images
+from .gif import encode_gif
 from .locking import project_lock
 
 REFERENCE_DIRS = ("references", "reference")
@@ -591,7 +592,7 @@ class Project:
             cfg = self.draft(data)
             validate_editor(cfg)
             kind = options.get("format", "all")
-            if kind not in {"frames", "atlas", "webp", "all", "project", "review"}:
+            if kind not in {"frames", "atlas", "webp", "gif", "all", "project", "review"}:
                 raise ValueError("Unknown export format")
             output = io.BytesIO()
             with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -636,6 +637,8 @@ class Project:
                                    duration=[s["duration_ms"] for s in steps], loop=0 if review.get("loop", True) else 1,
                                    lossless=True, method=4)
                     archive.writestr("review.webp", buffer.getvalue())
+                    archive.writestr("review.gif", encode_gif(
+                        images, [s["duration_ms"] for s in steps], 0 if review.get("loop", True) else 1))
                     archive.writestr("review.animation.json", json.dumps({"review": review, "steps": steps}, ensure_ascii=False, indent=2))
                     report(1, 1, "Review")
                 else:
@@ -650,15 +653,16 @@ class Project:
                     with TemporaryDirectory(prefix="sprite-export-") as temporary:
                         export_data = copy.deepcopy(cfg.data)
                         export_data["paths"] = {key: key for key in (
-                            "source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")}
+                            "source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "gif", "metadata")}
                         export_cfg = Config(cfg.path, Path(temporary), export_data)
                         summaries = []
                         for action_index, name in enumerate(names, 1):
                             check_cancel()
                             steps = action_steps(cfg, name)
-                            columns = min(cfg.action(name).get("pack", {}).get("columns", 4), len(steps))
-                            if columns * cfg.size[0] > 16384 or ((len(steps) + columns - 1) // columns) * cfg.size[1] > 16384:
-                                raise ValueError("Atlas exceeds 16,384 pixels on an axis; adjust columns or split the action")
+                            if kind in {"atlas", "all"}:
+                                columns = min(cfg.action(name).get("pack", {}).get("columns", 4), len(steps))
+                                if columns * cfg.size[0] > 16384 or ((len(steps) + columns - 1) // columns) * cfg.size[1] > 16384:
+                                    raise ValueError("Atlas exceeds 16,384 pixels on an axis; adjust columns or split the action")
                             folder = export_cfg.directory("sprites") / name
                             folder.mkdir(parents=True)
                             for index, step in enumerate(steps):
@@ -671,6 +675,8 @@ class Project:
                                 summaries.append(pack_action(export_cfg, name))
                             if kind in {"webp", "all"}:
                                 preview_action(export_cfg, name)
+                            if kind in {"gif", "all"}:
+                                preview_gif(export_cfg, name)
                             report(action_index, total, name)
                         if summaries:
                             update_manifest(export_cfg, summaries)

@@ -176,6 +176,28 @@ class SpritePipelineTests(unittest.TestCase):
         self.assertEqual([entry["duration"] for entry in runtime["frames"].values()], [100] * 3)
         self.assertEqual(before, (atlas_path.read_bytes(), runtime_path.read_bytes()))
 
+    def test_gif_animation_clears_moving_frames_and_rounds_timing(self):
+        from sprite_pipeline.gif import encode_gif
+        frames = []
+        for index, color in enumerate(("red", "green", "blue")):
+            frame = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+            frame.paste(color, (index * 4 + 1, 4, index * 4 + 5, 8))
+            frames.append(frame)
+        content = encode_gif(frames, [62, 100, 120], 2)
+        with Image.open(io.BytesIO(content)) as gif:
+            self.assertEqual(gif.n_frames, 3)
+            self.assertEqual(gif.info["loop"], 1)  # GIF stores repeats after the first pass.
+            for index, duration in enumerate((60, 100, 120)):
+                gif.seek(index)
+                image = gif.convert("RGBA")
+                self.assertEqual(gif.info["duration"], duration)
+                self.assertEqual(gif.disposal_method, 2)
+                self.assertEqual(image.getbbox(), (index * 4 + 1, 4, index * 4 + 5, 8))
+                self.assertEqual(image.getpixel((1, 4))[3], 255 if index == 0 else 0)
+        once = encode_gif(frames, [100] * 3, 1)
+        with Image.open(io.BytesIO(once)) as gif:
+            self.assertNotIn("loop", gif.info)
+
     def test_default_pack_preserves_manual_edits_and_needs_no_intermediate_frames(self):
         cfg = self.config()
         final = cfg.directory("sprites") / "walk"

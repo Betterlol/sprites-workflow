@@ -117,8 +117,9 @@ CLI 使用 `python tools/projects.py history <工程 ID>` 查看版本，再用 
 - **PNG 帧序列**：按游戏顺序编号的单帧 ZIP。
 - **图集**：PNG、TexturePacker Hash JSON、动作元数据和 manifest。
 - **WebP**：按展示顺序、逐步时长和展示循环编码，并附播放记录。
-- **完整动作资源**：包含上述三类，可选择一个或多个动作。
-- **Review**：当前 Review 的 WebP 与播放记录。
+- **GIF**：同样使用展示顺序和循环设置，适合在系统播放器中查看；ZIP 内的 `gif/` 目录包含 GIF 与逐步播放记录。GIF 每帧最多 256 色，透明度只有透明或不透明，时长按 10 ms 取整且至少 20 ms，画质以 WebP 为准。
+- **完整动作资源**：包含上述四类，可选择一个或多个动作。
+- **Review**：当前 Review 的 WebP、GIF 与播放记录。
 - **完整工程**：原图、processed PNG / 阶段描述、工程 JSON、`references/`（及已有 `reference/`）和工程 `README.md`。路径统一为相对路径，解压到 `workspaces/<目录名>/` 即可在列表中打开，也可以通过 `--config` 打开。切图缓存和交付目录不包含在备份中。
 
 其他导出类型用于交付游戏资源；需要重新打开整个编辑工程时，请选择“完整工程”。所有导出都基于当前动作草稿和已应用的图片，不要求先保存配置，也不写入项目的 `frames/`、`sheets/` 或 `previews/`。

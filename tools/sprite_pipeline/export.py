@@ -14,6 +14,7 @@ from texturepacker import TexturePackerFrame, write_texturepacker_hash
 from .animation import playback
 from .config import Config, inside
 from .files import numbered_frames, read_image, write_json
+from .gif import encode_gif
 
 
 def final_frames(cfg: Config, name: str) -> tuple[list[Path], list[Image.Image]]:
@@ -38,6 +39,22 @@ def preview_action(cfg: Config, name: str) -> dict:
         )
         staged.replace(output)
     # Describes authored playback even if WebP merges consecutive identical poses.
+    write_json(output.with_suffix(".animation.json"), {
+        "schema": "sprite-preview-v1", "action": name, "loop": loop,
+        "steps": [{"frame": paths[index].name, "duration_ms": duration} for index, duration in zip(order, durations)],
+    })
+    return {"preview": output.relative_to(cfg.root).as_posix(), "steps": len(order)}
+
+
+def preview_gif(cfg: Config, name: str) -> dict:
+    paths, images = final_frames(cfg, name)
+    order, durations, loop = playback(cfg.action(name), len(images))
+    output = cfg.directory("gif") / f"{cfg.character}_{name}.gif"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".sprite-gif-", dir=output.parent) as temporary:
+        staged = Path(temporary) / output.name
+        staged.write_bytes(encode_gif([images[index] for index in order], durations, loop))
+        staged.replace(output)
     write_json(output.with_suffix(".animation.json"), {
         "schema": "sprite-preview-v1", "action": name, "loop": loop,
         "steps": [{"frame": paths[index].name, "duration_ms": duration} for index, duration in zip(order, durations)],
