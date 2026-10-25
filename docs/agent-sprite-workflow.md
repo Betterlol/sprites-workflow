@@ -8,7 +8,7 @@
 
 1. 依次读取根目录 `AGENTS.md`、`workspaces/README.md`、本流程、目标工程 `README.md` 和 `pipeline.json`；用 `python tools/projects.py status <project-id>` 获取当前配置、版本、素材和警告。
 2. 以磁盘中的实际引用核对工程说明。说明过期、来源记录不存在或基准不明确时，先记录差异，不根据旧动作名、文件编号或历史导出来猜当前状态。
-3. 草稿、提示词、参考帧副本、候选图和 Review 证据放在 `_work/<task>/`。不把它们导入 `references/`、`source/` 或 `processed_sprites/`。
+3. 草稿、提示词、参考帧副本、候选图和必要的 Review 证据放在 `_work/<task>/`，按 [工作目录指南](agent-work-directory.md) 优先使用通用工具并控制批量截图。不把候选导入 `references/`、`source/` 或 `processed_sprites/`。
 4. 将本次范围、已确认基准、动作拆分和验收记录写入工程 `README.md` 的“制作记录”，可使用文末模板。沿用已有确认和任务授权，无须为每个子动作重复请求确认；不能把未检查的候选标为已批准。
 
 现有 `assets/` 和无关工程不在任务范围内。文档审阅或文档修改任务不得顺带修改素材、动作配置或重新处理图片。

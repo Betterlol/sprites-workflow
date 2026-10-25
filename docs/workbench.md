@@ -122,6 +122,9 @@ CLI 使用 `python tools/projects.py history <工程 ID>` 查看版本，再用 
 - **Review**：当前 Review 的 WebP、GIF 与播放记录。
 - **完整工程**：原图、processed PNG / 阶段描述、工程 JSON、`references/`（及已有 `reference/`）和工程 `README.md`。路径统一为相对路径，解压到 `workspaces/<目录名>/` 即可在列表中打开，也可以通过 `--config` 打开。切图缓存和交付目录不包含在备份中。
 
+Agent 可用 `python tools/projects.py qa <工程> --action <动作> --output <新目录>` 从已应用的 processed 帧一次生成 WebP、GIF、逐槽位对照图和时序报告；也支持 `--review <已有Review>` 或重复 `--ref <processed引用>`。这个只读命令适合取代大量逐帧浏览器截图，实际视觉验收仍需观看动画与关键接缝。
+特殊节奏可用 `--sequence <JSON文件>` 提供有序的 `steps`（每步 `ref`、`duration_ms`）和 `loop`，直接生成同样的证据，不必改动工程动作。
+
 其他导出类型用于交付游戏资源；需要重新打开整个编辑工程时，请选择“完整工程”。所有导出都基于当前动作草稿和已应用的图片，不要求先保存配置，也不写入项目的 `frames/`、`sheets/` 或 `previews/`。
 
 网页导出会显示当前处理阶段与已完成项目数。“取消生成”会在当前文件或动作编码结束后的安全边界停止任务；取消或失败的任务不提供不完整 ZIP。导出任务保存在本次服务进程内，重启本地服务后需重新生成。

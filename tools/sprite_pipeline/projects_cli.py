@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 
 from .config import load_config
+from .composition_check import compare_composition
+from .export_check import check_export
 from .projects import DEFAULT_WORKSPACES, ProjectStore
+from .qa import render_qa
 from .workbench import ConflictError, validate_editor
 
 
@@ -25,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("--anchor-x", type=float, default=.5)
     create.add_argument("--anchor-y", type=float, default=.9)
     commands.add_parser("list")
-    for name in ("status", "validate", "apply", "prepare", "save", "import", "delete", "export"):
+    for name in ("status", "validate", "apply", "prepare", "save", "import", "delete", "export", "qa"):
         command = commands.add_parser(name)
         command.add_argument("project")
         if name == "apply":
@@ -48,6 +51,18 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--exclude-action", action="append", dest="exclude_actions",
                                  help="Exclude an action after --action selection; repeatable; resource exports only")
             command.add_argument("--output", type=Path, required=True, help="New ZIP file; existing files are never overwritten")
+        if name == "qa":
+            selection = command.add_mutually_exclusive_group(required=True)
+            selection.add_argument("--action", help="Inspect one saved action")
+            selection.add_argument("--review", help="Inspect one saved Review")
+            selection.add_argument("--ref", action="append", dest="references",
+                                   help="Inspect processed references in the given order; repeat for each slot")
+            selection.add_argument("--sequence", type=Path,
+                                   help="JSON with ordered processed refs, duration_ms and loop")
+            command.add_argument("--mode", choices=("runtime", "display"),
+                                 help="Action playback mode; defaults to runtime")
+            command.add_argument("--output", type=Path, required=True,
+                                 help="New evidence directory; existing directories are never overwritten")
     history = commands.add_parser("history", help="List recoverable artwork operations")
     history.add_argument("project")
     restore = commands.add_parser("restore", help="Restore a recorded artwork operation")
@@ -55,6 +70,19 @@ def main(argv: list[str] | None = None) -> int:
     restore.add_argument("version", help="Version ID returned by history")
     restore.add_argument("--revision", help="Expected config revision, if already inspected")
     restore.add_argument("--asset-revision", help="Expected material revision, if already inspected")
+    composition = commands.add_parser("check-composition", help="Compare an action with a runtime Review or timed sequence")
+    composition.add_argument("project")
+    composition.add_argument("--action", required=True, help="Complete runtime action")
+    expected = composition.add_mutually_exclusive_group(required=True)
+    expected.add_argument("--review", help="Saved runtime Review of the component parts")
+    expected.add_argument("--sequence", type=Path, help="Explicit JSON playback sequence")
+    verify_export = commands.add_parser("check-export", help="Verify a resource ZIP against current processed sprites")
+    verify_export.add_argument("project")
+    verify_export.add_argument("--archive", type=Path, required=True, help="Resource ZIP to inspect without extracting")
+    verify_export.add_argument("--format", choices=("frames", "atlas", "webp", "gif", "all"),
+                               help="Require this resource format; defaults to auto-detection")
+    verify_export.add_argument("--action", action="append", dest="actions",
+                               help="Require this action in the ZIP; repeat to check a filtered export")
     args = parser.parse_args(argv)
     try:
         store = ProjectStore(args.workspace_root)
@@ -97,6 +125,19 @@ def main(argv: list[str] | None = None) -> int:
                     with args.output.open("xb") as output:
                         output.write(content)
                     result = {"output": str(args.output.resolve()), "bytes": len(content)}
+                elif args.command == "qa":
+                    sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
+                    result = render_qa(cfg, action=args.action, review=args.review,
+                                       references=args.references, sequence=sequence,
+                                       mode=args.mode, output=args.output)
+                elif args.command == "check-composition":
+                    sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
+                    result = compare_composition(cfg, args.action, review=args.review, sequence=sequence)
+                    valid = result["valid"]
+                elif args.command == "check-export":
+                    result = check_export(cfg, args.archive, expect_format=args.format,
+                                          expected_actions=args.actions)
+                    valid = result["valid"]
                 else:
                     revision = args.revision or project.revision
                     assets = args.asset_revision or project.changes()["asset_revision"]

@@ -15,6 +15,7 @@ Agent 操作素材前，必须读取 [制作与验收流程](../docs/agent-sprit
 | `references/` | 用户初始参考图、确认后的 idle 基准图及必要记录；不放候选图和迭代图，也不参与自动切图 |
 | `README.md` | 工程说明、IDLE 基准、角色约束、子动作边界、完整编排、验收记录和待办 |
 | `exports/` | CLI 按需生成的帧、图集、预览、元数据和 manifest；Git 默认忽略 |
+| `_work/<task>/` | Agent 的任务草稿与必要证据；不是素材输入或完整工程备份的一部分，见 [工作目录指南](../docs/agent-work-directory.md) |
 
 工程名称与目录名支持中文。创建时目录名留空则使用名称；目录名须符合 Windows 文件名约束，大小写不同也视为重名。`project.name` 是展示名，可在配置中修改；`character` 是交付文件中的英文标识。目录名不满足英文标识要求时，创建器会生成稳定的 `character`。目录名是网页 URL 使用的工程标识，不要在网页编辑中途直接搬动目录。
 
@@ -42,9 +43,25 @@ python tools/projects.py delete dafeiyu --kind reference --ref references/style.
 python tools/projects.py export dafeiyu --format project --output path/to/backup.zip
 python tools/projects.py export dafeiyu --format all --action idle --output path/to/idle.zip
 python tools/projects.py export dafeiyu --format all --exclude-action eat_rice_legacy --output path/to/game-actions.zip
+python tools/projects.py qa dafeiyu --action idle --output path/to/idle-qa
+python tools/projects.py qa dafeiyu --action idle --mode display --output path/to/idle-display-qa
+python tools/projects.py qa dafeiyu --review idle_to_attack --output path/to/review-qa
+python tools/projects.py qa dafeiyu --ref idle/000.png --ref attack/000.png --output path/to/join-qa
+python tools/projects.py qa dafeiyu --sequence path/to/playback.json --output path/to/custom-qa
+python tools/projects.py check-composition dafeiyu --action sing --review sing_parts
+python tools/projects.py check-composition dafeiyu --action sing --sequence path/to/playback.json
+python tools/projects.py check-export dafeiyu --archive path/to/game-actions.zip --format all --action sing
 ```
 
 动作资源导出的 `--action` 和 `--exclude-action` 都可重复指定；不传 `--action` 时从全部动作开始，再应用排除项。未知动作名、排除后没有剩余动作、在 `--format project` 完整工程备份中使用排除参数，都会报错且不生成 ZIP。筛选只影响本次产物，不修改工程配置。
+
+`qa` 从已保存配置和 `processed_sprites/` 读取素材，按动作的游戏/展示播放、已保存的 Review 或重复给出的 `--ref` 顺序，生成 `preview.webp`、`preview.gif`、每页最多 36 个播放槽位的 `contact-*.png` 和 `report.json`。原始素材引用使用工程默认 FPS。报告记录逐槽位引用、起始时间、时长、配置及素材摘要；动画编码可能合并相同画面，GIF 时长还会按 10 ms 取整，因此逐槽位时间以报告为准。输出必须是不存在的新目录，不能位于 source、processed 或 references 内；命令不修改工程素材和配置。结果供实际观看和复查，不能自动判定运动是否自然。
+
+需要自定义逐帧时长时，`--sequence` 接收 JSON，例如 `{"loop":1,"steps":[{"ref":"idle/000.png","duration_ms":150},{"ref":"attack/000.png","duration_ms":80}]}`。`loop` 与 WebP 相同：0 为无限循环，1 为播放一次；最多 10000 步。它不创建动作或 Review，也不改变正式编排，适合临时检查特殊接缝。
+
+`check-composition` 把完整动作的**游戏播放**槽位与一个已保存的 runtime Review 或序列 JSON 逐项比较引用和毫秒时长，返回首个差异、两侧槽位总数/时长及各片段边界；匹配时 `valid=true`、退出码 0，不匹配时 `valid=false`、退出码 1。边界重复引用只报告，不擅自去重或判定画面好坏。命令只读，需要当前已保存配置和现有 processed 帧。
+
+`check-export` 只读检查 `projects.py export` 的资源 ZIP：CRC、导出 PNG 与当前 processed 字节、图集像素/时长/元数据、WebP/GIF 播放记录及实际可解码的画面和时长。`--format` 可要求包含指定格式或 `all`；重复 `--action` 可要求指定动作必须存在，同时仍会检查 ZIP 内其他动作。省略时按 ZIP 中已有动作和格式检查，无法识别整个格式组或动作被完全遗漏。返回 `valid`、`issues` 和格式限制说明，不自动修改或修复交付包。完整工程备份不属于此检查；旧 ZIP 若与当前配置或 processed 素材不同，会报告失败。GIF 的期望颜色按项目的 256 色规则量化后比较；合并相同帧时报告会说明可核对的范围。
 
 需要修改配置时，先读取 `status` 的 `data` 和 `revision`，把修改后的配置写入独立草稿 JSON，再提交：
 

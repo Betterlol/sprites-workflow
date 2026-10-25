@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import struct
 
 from PIL import Image
 
@@ -45,5 +46,8 @@ def encode_gif(images: list[Image.Image], durations: list[int], loop: int) -> by
     elif loop > 1:
         options["loop"] = loop - 1
     output = io.BytesIO()
-    frames[0].save(output, **options)
+    try:
+        frames[0].save(output, **options)
+    except struct.error as error:
+        raise ValueError("GIF merged frame duration exceeds its limit; shorten repeated holds") from error
     return output.getvalue()
