@@ -10,11 +10,11 @@ from PIL import Image
 def _indexed_frame(image: Image.Image) -> Image.Image:
     rgba = image.convert("RGBA")
     alpha = rgba.getchannel("A")
-    rgb = Image.new("RGB", rgba.size, (0, 0, 0))
-    rgb.paste(rgba, mask=alpha)
+    transparent = alpha.point(lambda value: 255 if value < 128 else 0)
+    rgb = rgba.convert("RGB")
+    rgb.paste((0, 0, 0), (0, 0), transparent)
     quantized = rgb.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     indexed = quantized.point(lambda value: value + 1)
-    transparent = alpha.point(lambda value: 255 if value < 128 else 0)
     indexed.paste(0, (0, 0), transparent)
     palette = (quantized.getpalette() or [])[:765]
     indexed.putpalette([0, 0, 0] + palette + [0] * (765 - len(palette)))

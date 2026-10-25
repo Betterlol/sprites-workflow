@@ -198,6 +198,15 @@ class SpritePipelineTests(unittest.TestCase):
         with Image.open(io.BytesIO(once)) as gif:
             self.assertNotIn("loop", gif.info)
 
+    def test_gif_keeps_the_color_of_a_retained_antialiased_edge(self):
+        from sprite_pipeline.gif import encode_gif
+        first = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+        first.putpixel((3, 3), (255, 255, 255, 128))
+        second = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+        second.putpixel((4, 3), (255, 0, 0, 255))
+        with Image.open(io.BytesIO(encode_gif([first, second], [100, 100], 1))) as gif:
+            self.assertEqual(gif.convert("RGBA").getpixel((3, 3)), (255, 255, 255, 255))
+
     def test_default_pack_preserves_manual_edits_and_needs_no_intermediate_frames(self):
         cfg = self.config()
         final = cfg.directory("sprites") / "walk"
