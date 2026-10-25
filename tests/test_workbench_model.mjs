@@ -60,6 +60,17 @@ const settingsMerge = mergeModule.mergeDraft(settingsBase,settingsLocal,settings
 assert.equal(settingsMerge.conflicts.length,0,'Derived anchor pixels cannot create a false conflict');
 assert.deepEqual(mergeModule.resolveMerge(settingsMerge).anchor.pixels,[16,32],
   'Merged pixels must be derived from the resolved canvas and normalized anchor');
+let layoutModule;
+try {
+  const layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout.js',import.meta.url),'utf8');
+  layoutModule = await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64'));
+} catch {}
+assert.equal(typeof layoutModule?.clampPanel,'function','Adjustable panels need shared geometry');
+assert.equal(layoutModule.clampPanel(900,1100,300,'left'),364,'Canvas must keep 420 px at 1100 px');
+assert.equal(layoutModule.clampPanel(100,1440,300,'left'),210,'Materials keep a usable minimum');
+assert.equal(layoutModule.clampPanel(900,1440,260,'right'),460,'Inspector has a readable maximum');
+assert.equal(layoutModule.clampTimeline(400,500),240,'Timeline leaves enough room for canvas and controls');
+assert.equal(layoutModule.savedSize('broken',260),260,'Malformed saved widths use defaults');
 const playerSource = await readFile(new URL('../tools/sprite_pipeline/web/player.js',import.meta.url),'utf8');
 const {Player} = await import('data:text/javascript;base64,' + Buffer.from(playerSource).toString('base64'));
 let imageCount = 0;

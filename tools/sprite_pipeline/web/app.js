@@ -1,5 +1,6 @@
 import {clone, frames, actionSteps, reviewSteps, editFrames, defaultReviews, reconcileReviewRanges, merge, roundMs} from './model.js';
 import {mergeDraft, resolveMerge, conflictKey} from './merge.js';
+import {clampPanel, clampTimeline, savedSize} from './layout.js';
 import {Player} from './player.js';
 
 const $ = selector => document.querySelector(selector);
@@ -18,6 +19,60 @@ let mergeContext;
 const previewCache = new Map();
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
+const LAYOUT_KEY = 'sprite-workbench-layout';
+let storedLayout = {};
+try { storedLayout = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {}; } catch {}
+const layout = {left:savedSize(storedLayout.left,260),right:savedSize(storedLayout.right,300),
+  timeline:savedSize(storedLayout.timeline,140)};
+function applyLayout(persist = false) {
+  const width = $('#workspace').clientWidth || window.innerWidth || 1440;
+  if (width > 1100) {
+    layout.left = clampPanel(layout.left,width,layout.right,'left');
+    layout.right = clampPanel(layout.right,width,layout.left,'right');
+  }
+  layout.timeline = clampTimeline(layout.timeline,$('#canvas-pane').clientHeight || window.innerHeight || 800);
+  $('#workspace').style.setProperty('--materials-width',`${layout.left}px`);
+  $('#workspace').style.setProperty('--properties-width',`${layout.right}px`);
+  $('#canvas-pane').style.setProperty('--timeline-height',`${layout.timeline}px`);
+  for (const [id,value,minimum,maximum] of [
+    ['left-splitter',layout.left,210,Math.max(layout.left,210,Math.min(420,width - 16 - 420 - layout.right))],
+    ['right-splitter',layout.right,250,Math.max(layout.right,250,Math.min(460,width - 16 - 420 - layout.left))],
+    ['timeline-splitter',layout.timeline,110,Math.max(110,Math.min(320,($('#canvas-pane').clientHeight || window.innerHeight || 800) - 260))],
+  ]) {
+    const handle = $(`#${id}`);
+    handle.setAttribute('aria-valuemin',minimum);
+    handle.setAttribute('aria-valuemax',maximum);
+    handle.setAttribute('aria-valuenow',value);
+  }
+  if (persist) { try { localStorage.setItem(LAYOUT_KEY,JSON.stringify(layout)); } catch {} }
+}
+function bindSplitter(id,key,axis,sign) {
+  const handle = $(`#${id}`);
+  handle.onkeydown = event => {
+    const delta = axis === 'x' ? {ArrowLeft:-24,ArrowRight:24}[event.key] : {ArrowUp:-24,ArrowDown:24}[event.key];
+    if (delta === undefined) return;
+    event.preventDefault(); layout[key] += delta * sign; applyLayout(true);
+  };
+  handle.onpointerdown = event => {
+    if (event.button !== 0) return;
+    event.preventDefault(); handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing');
+    const start = axis === 'x' ? event.clientX : event.clientY, initial = layout[key];
+    handle.onpointermove = move => {
+      layout[key] = initial + ((axis === 'x' ? move.clientX : move.clientY) - start) * sign;
+      applyLayout();
+    };
+    const finish = () => {
+      handle.onpointermove = null; handle.onpointerup = null; handle.onpointercancel = null;
+      document.body.classList.remove('resizing'); applyLayout(true);
+    };
+    handle.onpointerup = finish; handle.onpointercancel = finish;
+  };
+}
+bindSplitter('left-splitter','left','x',1);
+bindSplitter('right-splitter','right','x',-1);
+bindSplitter('timeline-splitter','timeline','y',-1);
+window.addEventListener('resize',() => applyLayout());
 function toast(message, error = false) {
   const box = $('#toast'); box.textContent = message; box.classList.toggle('error', error); box.hidden = false;
   $('#status-message').textContent = message;
@@ -152,7 +207,7 @@ async function openProject(projectId) {
     $('#source-upload').value = ''; $('#processed-upload').value = ''; $('#reference-upload').value = '';
     document.body.classList.remove('project-home'); setSnapshot(snapshot); suggestReviews();
     history.replaceState(null,'','?project=' + encodeURIComponent(projectId));
-    player.resize();
+    applyLayout(); player.resize();
     if (!snapshot.assets.length && !snapshot.sources.length) toast('工程已创建，可以导入第一张原图或单帧素材。');
   });
 }

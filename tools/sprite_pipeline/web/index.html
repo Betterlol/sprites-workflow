@@ -49,8 +49,8 @@
     <span id="material-state" data-state="quiet">素材：载入中</span>
   </div>
 
-  <main class="workspace">
-    <aside class="sidebar">
+  <main id="workspace" class="workspace">
+    <aside id="materials-pane" class="sidebar">
       <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><div class="item-actions"><button id="delete-item" class="text-button danger" hidden>删除</button><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div></div>
       <div id="item-list" class="item-list"></div>
       <div class="library-heading"><h2>素材库 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
@@ -61,7 +61,8 @@
       <div class="sidebar-footer"><button id="prepare" title="只生成缺失的 processed 素材，不覆盖现有图片">准备缺失素材</button><button id="migrate" title="将现有最终帧保留为可复用素材，并更新动作引用">保留已有最终帧</button></div>
     </aside>
 
-    <section class="editor">
+    <div id="left-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整素材区宽度" aria-orientation="vertical" aria-controls="materials-pane"></div>
+    <section id="canvas-pane" class="editor">
       <div class="canvas-toolbar"><div><span class="eyebrow" id="editor-kind">ACTION EDITOR</span><strong id="editor-title">—</strong></div><div class="view-controls"><label><input id="guides" type="checkbox" checked> 辅助线</label><label><input id="onion" type="checkbox"> 前帧叠图</label><label><input id="reference" type="checkbox"> Idle 参考</label><select id="background" aria-label="画布背景"><option value="checker">棋盘格</option><option value="dark">深色</option><option value="light">浅色</option></select><select id="zoom" aria-label="画布缩放"><option value="fit">适应画布</option><option value="1">100%</option><option value="0.5">50%</option><option value="2">200%</option></select></div></div>
       <div id="canvas-area" class="canvas-area">
         <span class="canvas-label" id="canvas-label">统一画布 · 固定锚点</span>
@@ -71,12 +72,14 @@
         <div id="canvas-loading" class="canvas-loading" hidden>正在处理…</div>
       </div>
       <div class="transport"><div class="transport-left"><button id="previous" class="icon-button" title="上一帧 ←" aria-label="上一帧">Ⅰ‹</button><button id="play" class="play-button" title="播放 / 暂停 Space" aria-label="播放">▶</button><button id="next" class="icon-button" title="下一帧 →" aria-label="下一帧">›Ⅰ</button><span id="play-position" class="mono">000 / 000</span></div><div class="transport-right"><label class="compact-label">速度 <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label><input id="loop-preview" type="checkbox" checked> 循环预览</label><span id="total-time" class="mono">0.00s</span></div></div>
+      <div id="timeline-splitter" class="splitter splitter-horizontal" role="separator" tabindex="0" aria-label="调整时间轴高度" aria-orientation="horizontal" aria-controls="timeline"></div>
       <div class="timeline-heading"><h2 id="timeline-title">帧时间轴</h2><div id="timeline-tools"></div></div>
       <div id="timeline" class="timeline" aria-label="帧时间轴"></div>
       <div class="timeline-footer"><span id="timeline-help">拖拽排序 · 点击素材添加 · Delete 移除所选帧</span><span id="timeline-stats" class="mono">0 FRAMES</span></div>
     </section>
 
-    <aside class="inspector"><div class="panel-heading"><h2>属性检查器</h2><span class="eyebrow">INSPECTOR</span></div><div id="inspector-content"></div></aside>
+    <div id="right-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整属性区宽度" aria-orientation="vertical" aria-controls="properties-pane"></div>
+    <aside id="properties-pane" class="inspector"><div class="panel-heading"><h2>属性检查器</h2><span class="eyebrow">INSPECTOR</span></div><div id="inspector-content"></div></aside>
   </main>
 
   <footer class="statusbar"><span id="status-message" role="status">所有素材保存在本机 · 导出时生成文件</span><span>← → 单步 <span class="divider">/</span> Space 播放 <span class="divider">/</span> Ctrl S 保存</span></footer>

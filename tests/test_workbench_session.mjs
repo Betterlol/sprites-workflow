@@ -18,7 +18,7 @@ class Classes {
   toggle(value, enabled) { enabled ??= !this.contains(value); enabled ? this.add(value) : this.remove(value); }
 }
 class Element {
-  constructor(value = '') { this.value = value; this.defaultValue = value; this.classList = new Classes(); this.dataset = {}; this.hidden = false; this.textContent = ''; this.tagName = 'DIV'; this.checked = true; this.open = false; }
+  constructor(value = '') { this.value = value; this.defaultValue = value; this.classList = new Classes(); this.dataset = {}; this.hidden = false; this.textContent = ''; this.tagName = 'DIV'; this.checked = true; this.open = false; this.attributes = new Map(); this.styles = new Map(); this.style = {setProperty:(key,val) => this.styles.set(key,val),getPropertyValue:key => this.styles.get(key)}; }
   set innerHTML(value) { this.html = value; this.mergeChoices = null; register(value); }
   get innerHTML() { return this.html || ''; }
   querySelectorAll(selector) {
@@ -39,7 +39,8 @@ class Element {
     }
     return [];
   }
-  setAttribute() {}
+  setAttribute(name,value) { this.attributes.set(name,String(value)); }
+  getAttribute(name) { return this.attributes.get(name); }
   addEventListener() {}
   showModal() { this.open = true; }
   close() { this.open = false; }
@@ -79,6 +80,7 @@ const projects = new Map([['alpha',snapshot('alpha')],['beta',snapshot('beta')]]
 const requests = [];
 const intervals = [];
 const previewRequests = [];
+const stored = new Map();
 let releaseSlowPreview = null;
 let allowDiscard = true;
 let pausedProject = null, resumeSnapshot = null;
@@ -86,7 +88,8 @@ const context = {
   ...model, ...mergeModel, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
   FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,cGl4ZWxz'; queueMicrotask(() => this.onload()); } },
   location:{pathname:'/',search:''}, history:{replaceState() {}},
-  window:{addEventListener() {}}, setTimeout:() => 1, clearTimeout() {}, setInterval:(_,delay) => intervals.push(delay),
+  window:{innerWidth:1440,addEventListener() {}}, localStorage:{getItem:key => stored.get(key) ?? null,setItem:(key,value) => stored.set(key,String(value))},
+  setTimeout:() => 1, clearTimeout() {}, setInterval:(_,delay) => intervals.push(delay),
   confirm:() => allowDiscard, console,
   fetch:async (url, options = {}) => {
     requests.push({url,options});
@@ -144,6 +147,9 @@ const context = {
   },
 };
 let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import.meta.url),'utf8');
+let layoutSource;
+try { layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout.js',import.meta.url),'utf8'); } catch {}
+if (layoutSource) Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64')));
 source = source.replace(/^import .*\n/gm,'');
 source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';
 vm.runInNewContext(source,context,{filename:'app.js'});
@@ -158,6 +164,12 @@ assert.equal(state.projectId,'alpha'); assert(!body.classList.contains('project-
 assert.equal(elements.get('project-name').textContent,'alpha',elements.get('toast').textContent);
 assert(elements.get('draft-state'),'The workbench needs a visible draft state');
 assert.match(elements.get('draft-state').textContent,/已保存/);
+assert(elements.get('left-splitter'),'Materials and canvas need an adjustable separator');
+const leftBefore = Number(elements.get('left-splitter').getAttribute('aria-valuenow'));
+elements.get('left-splitter').onkeydown({key:'ArrowRight',preventDefault() {}});
+assert(Number(elements.get('left-splitter').getAttribute('aria-valuenow')) > leftBefore,
+  'Keyboard adjustment should enlarge the materials pane');
+assert(stored.has('sprite-workbench-layout'),'Layout size should survive a reload');
 
 state.data.notes = ['human draft'];
 projects.get('alpha').asset_revision = 'new-pixels';

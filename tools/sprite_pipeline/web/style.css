@@ -44,3 +44,14 @@ input[type=checkbox],input[type=range]{min-height:0}
 .workflow-status [data-state=pending]{border-left-color:var(--orange);color:#f1cd9a}
 .workflow-status [data-state=error]{border-left-color:var(--danger);color:#ffb9b9}
 @media(prefers-reduced-motion:reduce){button{transition:none}}
+
+.workspace{grid-template-columns:var(--materials-width,260px) 8px minmax(420px,1fr) 8px var(--properties-width,300px)}
+.splitter{position:relative;z-index:2;background:#151a21;touch-action:none}
+.splitter::after{content:"";position:absolute;inset:calc(50% - 21px) 2px;border-radius:4px;background:#586475}
+.splitter:hover,.splitter:focus-visible{background:#26342b;outline:2px solid var(--accent);outline-offset:-2px}
+.splitter-vertical{cursor:col-resize;border-inline:1px solid var(--border)}
+.splitter-horizontal{height:8px;min-height:8px;cursor:row-resize;border-block:1px solid var(--border)}
+.splitter-horizontal::after{inset:2px calc(50% - 21px)}
+body.resizing{user-select:none;cursor:col-resize}
+.editor .timeline{height:var(--timeline-height,140px);min-height:110px;max-height:320px}
+@media(max-width:1100px){.workspace{grid-template-columns:minmax(180px,28%) minmax(0,1fr);overflow:auto}.workspace>.splitter-vertical{display:none}.inspector{grid-column:1/-1;min-height:260px}}
