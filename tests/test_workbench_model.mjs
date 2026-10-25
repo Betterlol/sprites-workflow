@@ -1,6 +1,17 @@
 // No npm dependencies: run with node tests/test_workbench_model.mjs.
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+const dragPlayerSource = await readFile(new URL('../tools/sprite_pipeline/web/player.js',import.meta.url),'utf8');
+const {Player:DragPlayer} = await import('data:text/javascript;base64,' + Buffer.from(dragPlayerSource).toString('base64'));
+const paints = [];
+const canvasPlayer = Object.create(DragPlayer.prototype);
+Object.assign(canvasPlayer,{size:[32,32],index:1,options:{reference:true,onion:true,guides:false},idle:'idle',
+  steps:[{url:'previous'},{url:'current',previewOffset:[12,-5]}],assets:new Map([['idle',{url:'idle'}]]),
+  images:new Map(['idle','previous','current'].map(name => [name,{name,complete:true,naturalWidth:32}])),
+  context:{clearRect() {},drawImage(image,x,y) { paints.push([image.name,x,y,this.globalAlpha]); }}});
+canvasPlayer.draw();
+assert.deepEqual(paints,[['idle',0,0,0.22],['previous',0,0,0.28],['current',12,-5,1]],
+  'Single-frame movement translates the current sprite while idle and previous-frame alignment references stay fixed');
 const source = await readFile(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url),'utf8');
 const {actionSteps,reviewSteps,editFrames,roundMs,reconcileReviewRanges} = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 

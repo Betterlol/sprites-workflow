@@ -106,3 +106,6 @@ body.project-home .workflow-status,body.project-home .pane-switch{display:none}
   .statusbar{display:none}
   #canvas-pane .canvas-area{min-height:120px}
 }
+/* Movement changes only the selected image inside the fixed preview canvas. */
+#stage.frame-movable{cursor:grab}
+#stage.frame-dragging{cursor:grabbing}

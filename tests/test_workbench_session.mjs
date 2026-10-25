@@ -45,7 +45,12 @@ class Element {
   }
   setAttribute(name,value) { this.attributes.set(name,String(value)); }
   getAttribute(name) { return this.attributes.get(name); }
-  addEventListener() {}
+  addEventListener(type,handler) { this.listeners ||= new Map(); (this.listeners.get(type) || this.listeners.set(type,[]).get(type)).push(handler); }
+  dispatch(type,event) { for (const handler of this.listeners?.get(type) || []) handler(event); }
+  getBoundingClientRect() { return {left:100,top:50,width:66,height:66}; }
+  setPointerCapture(id) { this.pointerId = id; }
+  hasPointerCapture(id) { return this.pointerId === id; }
+  releasePointerCapture() { this.pointerId = null; }
   showModal() { this.open = true; }
   close() { this.open = false; }
   focus() { document.activeElement = this; }
@@ -54,7 +59,6 @@ class Element {
 }
 function register(markup) {
   for (const [,tag,id,attributes] of markup.matchAll(/<([\w-]+)[^>]*\bid="([^"]+)"([^>]*)>/g)) {
-    if (elements.has(id)) continue;
     const element = new Element(attributes.match(/\bvalue="([^"]*)"/)?.[1] || ''); element.tagName = tag.toUpperCase(); elements.set(id,element);
   }
 }
@@ -81,6 +85,7 @@ class Player {
   draw() {}
   setProject(data) { this.size = data.frame_size; this.anchor = data.anchor.pixels; }
   setSteps(steps,index = 0) { this.steps = steps; this.index = index; this.onStep(index); }
+  seek(index) { this.index = index; this.onStep(index); }
 }
 const snapshot = id => ({data:{version:2,project:{name:id},character:id,frame_size:[32,32],anchor:{x:0.5,y:0.90625,pixels:[16,29]},defaults:{},sources:{},actions:{},workbench:{reviews:{}}},
   revision:'r-' + id,asset_revision:'a-' + id,sources:[],assets:[],references:[],legacy_count:0,project:{id,name:id,directory:'/workspaces/' + id},warnings:[]});
@@ -94,6 +99,7 @@ let releaseSlowPreview = null;
 let releaseHeldUpload = null;
 let allowDiscard = true;
 let pausedProject = null, resumeSnapshot = null;
+let holdDragPreview = false, releaseDragPreview;
 const context = {
   ...model, ...mergeModel, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
   ResizeObserver:class { constructor(callback) { this.callback = callback; } observe(element) { observedResizes.set(element,this.callback); } },
@@ -147,7 +153,15 @@ const context = {
         const body = JSON.parse(options.body);
         previewRequests.push(body.source);
         if (body.source === 'slow.png') await new Promise(resolve => { releaseSlowPreview = resolve; });
+        if (body.source === 'drag.png' && holdDragPreview) await new Promise(resolve => { releaseDragPreview = resolve; });
         result = {scale:1,frames:[{id:'000',ref:body.source.replace('.png','/000.png'),box:[0,0,8,8],url:'/preview/' + body.source,bbox:[0,0,8,8]}]};
+        if (body.source === 'drag.png') result.frames = ['000','001'].map(id => ({id,ref:`drag/${id}.png`,box:[0,0,8,8],url:`/preview/drag-${id}`,bbox:[4,5,14,17]}));
+      }
+      else if (operation === 'apply') {
+        const payload = JSON.parse(options.body);
+        assert.equal(payload.revision,project.revision);
+        assert.equal(payload.asset_revision,project.asset_revision);
+        project.data = structuredClone(payload.data); project.revision += '-applied'; project.asset_revision += '-applied'; result = project;
       }
       else {
         assert(!operation,`Unexpected operation ${operation}`);
@@ -162,7 +176,7 @@ let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import
 let layoutSource;
 try { layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout.js',import.meta.url),'utf8'); } catch {}
 if (layoutSource) Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64')));
-source = source.replace(/^import .*\n/gm,'');
+source = source.replace(/^import [^\r\n]*\r?\n/gm,'');
 source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';
 vm.runInNewContext(source,context,{filename:'app.js'});
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -429,3 +443,103 @@ assert(requests.some(request => request.url.endsWith('/jobs/export') &&
   JSON.parse(request.options.body).options?.format === 'gif'),
   'GIF choice should start the same tracked export flow');
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');
+
+// Dragging edits only the selected frame draft, measured in canvas pixels.
+await openProject('beta');
+state.sources = [{file:'drag.png',url:'/sources/drag.png',size:[16,16]}];
+state.data.frame_size = [32,32];
+state.data.defaults.process = {offset:[3,-2]};
+state.data.sources = {'drag.png':{process:{overrides:{'001':{scale:0.75}}}}};
+state.source = 'drag.png'; mode('source'); await previewSource();
+state.selected = 1; renderAll();
+state.saved = JSON.stringify(state.data); state.savedData = structuredClone(state.data);
+state.history = []; state.future = [];
+const stage = elements.get('stage');
+stage.clientLeft = 1; stage.clientTop = 1;
+const pointer = (clientX,clientY,extra = {}) => ({clientX,clientY,pointerId:7,button:0,preventDefault() {},...extra});
+const sendPointer = (type,x,y,extra) => stage.dispatch(type,pointer(x,y,extra));
+const requestsBeforeDrag = requests.length;
+sendPointer('pointerdown',116,66);
+sendPointer('pointermove',136,56);
+assert.equal(Number(elements.get('override-x').value),13,'A 20-screen-pixel move at 200% adds 10 canvas pixels to the inherited offset');
+assert.equal(Number(elements.get('override-y').value),-7);
+assert.deepEqual([...player.steps[1].previewOffset],[10,-5]);
+assert(!player.steps[0].previewOffset,'Other frames keep their own positions');
+assert.equal(dirty(),false,'Movement is transient until pointer release');
+assert.equal(requests.length,requestsBeforeDrag,'Dragging must not process or save on every pointer movement');
+sendPointer('pointerup',136,56);
+assert.deepEqual([...state.data.sources['drag.png'].process.overrides['001'].offset],[13,-7]);
+assert.equal(state.data.sources['drag.png'].process.overrides['001'].scale,0.75);
+assert.equal(state.history.length,1,'A complete drag is one undo step');
+assert(dirty());
+assert.equal(requests.length,requestsBeforeDrag,'Release schedules a read-only preview, never an implicit save/apply');
+
+// A second adjustment accumulates even before the server preview returns.
+sendPointer('pointerdown',140,62); sendPointer('pointermove',144,68); sendPointer('pointerup',144,68);
+assert.deepEqual([...state.data.sources['drag.png'].process.overrides['001'].offset],[15,-4]);
+assert.deepEqual([...player.steps[1].previewOffset],[12,-2]);
+assert.equal(state.history.length,2);
+const dataBeforeCancel = JSON.stringify(state.data);
+sendPointer('pointerdown',144,68); sendPointer('pointermove',154,64);
+sendPointer('pointercancel',154,64);
+assert.equal(JSON.stringify(state.data),dataBeforeCancel);
+assert.deepEqual([...player.steps[1].previewOffset],[12,-2]);
+assert.equal(Number(elements.get('override-x').value),15);
+assert.equal(state.history.length,2,'Cancelled movement does not enter undo history');
+sendPointer('pointerdown',144,68); sendPointer('pointermove',184,68);
+assert.equal(Number(elements.get('override-x').value),35,'Canvas borders are excluded when converting screen movement to image pixels');
+sendPointer('pointercancel',184,68);
+sendPointer('pointerdown',144,68); sendPointer('pointermove',148,68);
+documentListeners.get('keydown').forEach(callback => callback({key:'Escape',preventDefault() {}}));
+assert.equal(Number(elements.get('override-x').value),15,'Escape restores the pre-drag offset');
+sendPointer('pointerup',148,68);
+assert.equal(state.history.length,2);
+sendPointer('pointerdown',144,68); sendPointer('pointerup',144,68);
+assert.equal(state.history.length,2,'A click without movement does not add an undo step');
+sendPointer('pointerdown',144,68,{button:2}); sendPointer('pointermove',150,68); sendPointer('pointerup',150,68);
+assert.equal(JSON.stringify(state.data),dataBeforeCancel,'Secondary-button drags cannot edit offsets');
+sendPointer('pointerdown',144,68); sendPointer('pointermove',214,68,{pointerId:8});
+assert.equal(Number(elements.get('override-x').value),15,'Other pointers cannot move an active drag');
+sendPointer('pointermove',214,68);
+assert.equal(Number(elements.get('override-x').value),50,'Captured movement outside the canvas is not clamped to its edge');
+sendPointer('lostpointercapture',214,68);
+assert.equal(Number(elements.get('override-x').value),15);
+sendPointer('pointerdown',144,68); sendPointer('pointermove',150,68);
+mode('action'); sendPointer('pointerup',150,68);
+assert.equal(JSON.stringify(state.data),dataBeforeCancel,'Switching modes cancels movement rather than applying it to another view');
+mode('source'); state.selected = 1; renderAll();
+
+// Background responses started before a drag cannot replace its baseline.
+holdDragPreview = true;
+const staleDragPreview = previewSource(true); await flush();
+const dragBaseline = state.preview;
+sendPointer('pointerdown',144,68); sendPointer('pointermove',146,68);
+releaseDragPreview(); await staleDragPreview;
+assert.equal(state.preview,dragBaseline);
+assert.deepEqual([...player.steps[1].previewOffset],[13,-2]);
+sendPointer('pointerup',146,68); holdDragPreview = false;
+assert.deepEqual([...state.data.sources['drag.png'].process.overrides['001'].offset],[16,-4]);
+context.hooks.restoreHistory(false);
+assert.deepEqual([...state.data.sources['drag.png'].process.overrides['001'].offset],[15,-4]);
+context.hooks.restoreHistory(true);
+assert.deepEqual([...state.data.sources['drag.png'].process.overrides['001'].offset],[16,-4]);
+await previewSource();
+assert(!player.steps[1].previewOffset,'Authoritative server preview removes the temporary translation');
+
+// Copy mode and empty-canvas clicks must not simulate unappliable movement.
+state.data.sources['drag.png'].process.overrides['001'].mode = 'copy'; renderAll();
+const beforeCopyDrag = JSON.stringify(state.data);
+sendPointer('pointerdown',116,66); sendPointer('pointermove',120,70); sendPointer('pointerup',120,70);
+assert.equal(JSON.stringify(state.data),beforeCopyDrag);
+delete state.data.sources['drag.png'].process.overrides['001'].mode; renderAll();
+sendPointer('pointerdown',160,110); sendPointer('pointermove',162,112); sendPointer('pointerup',162,112);
+assert.equal(JSON.stringify(state.data),beforeCopyDrag.replace(',"mode":"copy"',''));
+const projectBeforeApply = JSON.stringify(projects.get('beta').data);
+assert.notEqual(JSON.stringify(state.data),projectBeforeApply,'Disk configuration remains unchanged before explicit apply');
+projects.get('beta').sources = structuredClone(state.sources);
+await elements.get('apply-source').onclick();
+const applied = requests.filter(request => request.url.endsWith('/apply')).at(-1);
+assert(applied);
+assert.deepEqual(JSON.parse(applied.options.body).data.sources['drag.png'].process.overrides['001'].offset,[16,-4]);
+assert(!dirty());
+console.log('Workbench drag preview: scaled movement, accumulation, cancellation, stale responses, undo and explicit apply passed.');

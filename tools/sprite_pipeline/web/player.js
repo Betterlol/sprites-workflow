@@ -103,7 +103,7 @@ export class Player {
     if (!image?.complete || !image.naturalWidth) return;
     this.context.globalAlpha = opacity;
     // Keep stored pixels at their actual size while canvas settings are a draft.
-    this.context.drawImage(image, 0, 0);
+    this.context.drawImage(image, ...(step.previewOffset || [0, 0]));
     this.context.globalAlpha = 1;
   }
   draw() {
