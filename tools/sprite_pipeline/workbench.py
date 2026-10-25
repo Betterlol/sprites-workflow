@@ -13,6 +13,7 @@ import io
 import json
 import shutil
 import zipfile
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import quote, urlencode
@@ -24,6 +25,7 @@ from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_dat
 from .export import pack_action, preview_action, update_manifest
 from .extract import cut_frames, preserve_slice_ids, previous_slices
 from .files import numbered_frames, read_image, replace_frames, write_json
+from .history import HistoryConflictError, ProjectHistory
 from .process import process_images
 from .locking import project_lock
 
@@ -127,6 +129,28 @@ class Project:
         self._image_config = load_config(self.path)
         self._image_config_signature = self.config_signature()
         self._asset_metadata: dict[Path, tuple[tuple[int, int], list[int], tuple[int, int, int, int] | None]] = {}
+        self.versions = ProjectHistory(self.path.parent)
+
+    def history_transaction(self, operation: str, paths: list[Path]):
+        if all(path.resolve().is_relative_to(self.path.parent) for path in paths):
+            return self.versions.transaction(operation, paths)
+        # Explicit --config projects may keep source/processed paths outside
+        # their config directory. Their legacy operations remain available.
+        return nullcontext()
+
+    def history_entries(self) -> list[dict]:
+        with self.lock:
+            return self.versions.list()
+
+    def restore(self, version_id: str, revision: str, asset_revision: str | None = None) -> dict:
+        with self.lock:
+            self.check_revision(revision)
+            self.check_assets(asset_revision)
+            try:
+                self.versions.restore(version_id, lambda: validate_editor(load_config(self.path)))
+            except HistoryConflictError as error:
+                raise ConflictError(str(error)) from error
+            return self.state()
 
     def config_signature(self) -> str:
         return self.revision
@@ -312,11 +336,12 @@ class Project:
             self.check_assets(asset_revision)
             cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
             directory = inside(cfg.directory("processed_sprites"), cfg.source_id(filename))
-            replace_frames(directory, frames, owned=r"\d+\.png", metadata={
-                "stage": "process", "source": filename, "scale": scale, "files": list(frames),
-                "frames": descriptors, "fingerprint": self.fingerprint(cfg, filename),
-            })
-            write_json(self.path, cfg.data)
+            with self.history_transaction("apply", [self.path, directory]):
+                replace_frames(directory, frames, owned=r"\d+\.png", metadata={
+                    "stage": "process", "source": filename, "scale": scale, "files": list(frames),
+                    "frames": descriptors, "fingerprint": self.fingerprint(cfg, filename),
+                })
+                write_json(self.path, cfg.data)
             return self.state()
 
     def prepare(self, data: dict, revision: str, asset_revision: str | None = None) -> dict:
@@ -335,13 +360,15 @@ class Project:
             validate_editor(cfg)
             self.check_revision(revision)
             self.check_assets(asset_revision)
-            for filename, (_, _, frames, descriptors, scale) in pending:
-                cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
-                replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames,
-                               owned=r"\d+\.png", metadata={
-                                   "stage": "process", "source": filename, "scale": scale, "files": list(frames),
-                                   "frames": descriptors, "fingerprint": self.fingerprint(cfg, filename)})
-            write_json(self.path, cfg.data)
+            directories = [inside(cfg.directory("processed_sprites"), cfg.source_id(filename)) for filename, _ in pending]
+            with self.history_transaction("prepare", [self.path, *directories]):
+                for filename, (_, _, frames, descriptors, scale) in pending:
+                    cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
+                    replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames,
+                                   owned=r"\d+\.png", metadata={
+                                       "stage": "process", "source": filename, "scale": scale, "files": list(frames),
+                                       "frames": descriptors, "fingerprint": self.fingerprint(cfg, filename)})
+                write_json(self.path, cfg.data)
             return self.state()
 
     def migrate(self, data: dict, revision: str, asset_revision: str | None = None) -> dict:
@@ -377,10 +404,11 @@ class Project:
             validate_editor(cfg)
             self.check_revision(revision)
             self.check_assets(asset_revision)
-            for source, destination in copies:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, destination)
-            write_json(self.path, cfg.data)
+            with self.history_transaction("migrate", [self.path, *(destination for _, destination in copies)]):
+                for source, destination in copies:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, destination)
+                write_json(self.path, cfg.data)
             return {**self.state(), "imported": changed}
 
     def upload(self, kind: str, filename: str, content: bytes, data: dict, revision: str,
@@ -418,11 +446,12 @@ class Project:
             validate_editor(cfg)
             self.check_revision(revision)
             self.check_assets(asset_revision)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            # Exclusive creation also avoids races with external import tools.
-            with destination.open("xb") as output:
-                output.write(content)
-            write_json(self.path, cfg.data)
+            with self.history_transaction("upload " + kind, [self.path, destination]):
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                # Exclusive creation also avoids races with external import tools.
+                with destination.open("xb") as output:
+                    output.write(content)
+                write_json(self.path, cfg.data)
             return self.state()
 
     def delete(self, kind: str, references: list[str], data: dict, revision: str,
@@ -499,23 +528,24 @@ class Project:
             replacements = {**metadata, self.path: cfg.data}
             # Stage removed files and old metadata beside the project. If a
             # filesystem write fails, put them all back before reporting failure.
-            with TemporaryDirectory(prefix=".sprite-delete-", dir=self.path.parent) as temporary:
-                staged = []
-                written = []
-                try:
-                    for index, path in enumerate(dict.fromkeys([*targets, *replacements])):
-                        backup = Path(temporary) / str(index)
-                        path.replace(backup)
-                        staged.append((path, backup))
-                    for path, payload in replacements.items():
-                        write_json(path, payload)
-                        written.append(path)
-                except BaseException:
-                    for path in reversed(written):
-                        path.unlink()
-                    for path, backup in reversed(staged):
-                        backup.replace(path)
-                    raise
+            with self.history_transaction("delete " + kind, [*targets, *replacements]):
+                with TemporaryDirectory(prefix=".sprite-delete-", dir=self.path.parent) as temporary:
+                    staged = []
+                    written = []
+                    try:
+                        for index, path in enumerate(dict.fromkeys([*targets, *replacements])):
+                            backup = Path(temporary) / str(index)
+                            path.replace(backup)
+                            staged.append((path, backup))
+                        for path, payload in replacements.items():
+                            write_json(path, payload)
+                            written.append(path)
+                    except BaseException:
+                        for path in reversed(written):
+                            path.unlink()
+                        for path, backup in reversed(staged):
+                            backup.replace(path)
+                        raise
             return {**self.state(), "deleted": len(references)}
 
     def export(self, data: dict, options: dict) -> tuple[bytes, str, str]:

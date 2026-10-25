@@ -751,6 +751,27 @@ $('#new-item').onclick = () => {
   }
 };
 $('#save').onclick = save;
+$('#history-open').onclick = async () => {
+  const dialog = $('#history-dialog');
+  $('#history-list').textContent = '正在读取版本记录…';
+  dialog.showModal();
+  try {
+    const {versions} = await api('history');
+    $('#history-list').innerHTML = versions.map(version => `<div class="history-row" role="listitem"><div><strong>${escape(version.operation)}</strong><small>${escape(new Date(version.created_at * 1000).toLocaleString('zh-CN'))} · ${version.files} 个文件</small></div><button data-version="${escape(version.id)}">恢复此版本</button></div>`).join('') || '<p class="hint">还没有已完成的图片操作。</p>';
+    $('#history-list').querySelectorAll('[data-version]').forEach(button => {
+      button.onclick = async () => {
+        if (dirty() && !confirm('恢复会放弃当前未保存的草稿。继续？')) return;
+        if (!confirm('恢复该操作之前的图片与配置？此操作本身也会留下可恢复版本。')) return;
+        dialog.close();
+        await task('正在恢复版本…',async () => {
+          const snapshot = await api('restore',payload({version:button.dataset.version}));
+          player.pause(); setSnapshot(snapshot); toast('版本已恢复，工程已保存');
+        });
+      };
+    });
+  } catch (error) { $('#history-list').textContent = error.message; }
+};
+$('#history-close').onclick = () => $('#history-dialog').close();
 $('#reload').onclick = () => {
   if (dirty() && !confirm('重新载入会放弃当前未保存的草稿。继续？')) return;
   task('正在重新载入…',loadProject);

@@ -48,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--exclude-action", action="append", dest="exclude_actions",
                                  help="Exclude an action after --action selection; repeatable; resource exports only")
             command.add_argument("--output", type=Path, required=True, help="New ZIP file; existing files are never overwritten")
+    history = commands.add_parser("history", help="List recoverable artwork operations")
+    history.add_argument("project")
+    restore = commands.add_parser("restore", help="Restore a recorded artwork operation")
+    restore.add_argument("project")
+    restore.add_argument("version", help="Version ID returned by history")
+    restore.add_argument("--revision", help="Expected config revision, if already inspected")
+    restore.add_argument("--asset-revision", help="Expected material revision, if already inspected")
     args = parser.parse_args(argv)
     try:
         store = ProjectStore(args.workspace_root)
@@ -62,7 +69,13 @@ def main(argv: list[str] | None = None) -> int:
             # operation, so a CLI command cannot overwrite a browser writer.
             with project.lock:
                 cfg = load_config(project.path)
-                if args.command == "save":
+                if args.command == "history":
+                    result = {"versions": project.history_entries()}
+                elif args.command == "restore":
+                    revision = args.revision or project.revision
+                    assets = args.asset_revision or project.changes()["asset_revision"]
+                    result = project.restore(args.version, revision, assets)
+                elif args.command == "save":
                     data = json.loads(args.data.read_text(encoding="utf-8"))
                     result = project.save(data, args.revision)
                 elif args.command in {"status", "validate"}:

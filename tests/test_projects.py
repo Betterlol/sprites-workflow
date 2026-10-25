@@ -181,6 +181,190 @@ class ProjectWorkflowTests(unittest.TestCase):
         os.utime(image_path, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns + 1000000))
         self.assertEqual(self.snapshot()["assets"][0]["bbox"], [4, 5, 12, 14])
 
+    def test_image_operations_create_restorable_history_without_copying_unrelated_art(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        before_apply = snapshot["revision"]
+        applied = self.post("apply", snapshot, source="walk.png").json()
+        processed = self.root / "fish/processed_sprites/walk/000.png"
+        self.assertTrue(processed.is_file())
+        history = self.client.get("/api/projects/fish/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        versions = history.json()["versions"]
+        self.assertEqual(versions[0]["operation"], "apply")
+        self.assertEqual(versions[1]["operation"], "upload source")
+        restored = self.post("restore", applied, version=versions[0]["id"])
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertFalse(processed.exists())
+        self.assertEqual(restored.json()["revision"], before_apply)
+        self.assertEqual(restored.json()["sources"][0]["file"], "walk.png")
+        redo = self.client.get("/api/projects/fish/history").json()["versions"][0]
+        self.assertEqual(redo["operation"], "restore")
+        self.assertEqual(self.post("restore", restored.json(), version=redo["id"]).status_code, 200)
+        self.assertTrue(processed.is_file())
+
+    def test_deleted_manual_sprite_can_be_restored_but_external_edits_block_restore(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed", filename="manual.png", color="red").json()
+        manual = self.root / "fish/processed_sprites/imports/manual.png"
+        original = manual.read_bytes()
+        deleted = self.post("delete", snapshot, kind="processed", references=["imports/manual.png"]).json()
+        self.assertFalse(manual.exists())
+        history = self.client.get("/api/projects/fish/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        version = history.json()["versions"][0]
+        self.assertEqual(version["operation"], "delete processed")
+        manual.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGBA", (32, 32), "blue").save(manual)
+        self.assertEqual(self.post("restore", deleted, version=version["id"]).status_code, 409)
+        manual.unlink()
+        fresh = self.snapshot()
+        restored = self.post("restore", fresh, version=version["id"])
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(manual.read_bytes(), original)
+
+    def test_failed_apply_restores_prior_pixels_and_does_not_record_version(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        snapshot = self.post("apply", snapshot, source="walk.png").json()
+        processed = self.root / "fish/processed_sprites/walk/000.png"
+        original = processed.read_bytes()
+        history = self.client.get("/api/projects/fish/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        prior_versions = history.json()["versions"]
+        snapshot["data"]["sources"]["walk.png"]["process"] = {"offset": [1, 0]}
+        with patch("sprite_pipeline.workbench.write_json", side_effect=OSError("config write failed")):
+            with self.assertRaisesRegex(OSError, "config write failed"):
+                self.store.get("fish").apply(snapshot["data"], snapshot["revision"], "walk.png", snapshot["asset_revision"])
+        self.assertEqual(processed.read_bytes(), original)
+        self.assertEqual(self.client.get("/api/projects/fish/history").json()["versions"], prior_versions)
+
+    def test_prepared_source_and_approved_migration_are_recoverable(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        prepared = self.post("prepare", snapshot).json()
+        version = self.client.get("/api/projects/fish/history").json()["versions"][0]
+        self.assertEqual(version["operation"], "prepare")
+        self.assertTrue((self.root / "fish/processed_sprites/walk/000.png").exists())
+        restored = self.post("restore", prepared, version=version["id"]).json()
+        self.assertFalse((self.root / "fish/processed_sprites/walk/000.png").exists())
+
+        restored = self.import_image(restored, kind="processed", filename="manual.png", color="red").json()
+        restored["data"]["actions"]["idle"] = {"sprites": ["imports/manual.png"], "fps": 8}
+        self.assertEqual(self.post("save", restored).status_code, 200)
+        final = self.root / "fish/exports/frames/idle/idle_00.png"
+        final.parent.mkdir(parents=True)
+        Image.new("RGBA", (32, 32), "blue").save(final)
+        snapshot = self.snapshot()
+        migrated = self.post("migrate", snapshot)
+        self.assertEqual(migrated.status_code, 200, migrated.text)
+        new_ref = migrated.json()["data"]["actions"]["idle"]["sprites"][0]
+        self.assertTrue(new_ref.startswith("_approved/idle/"))
+        version = self.client.get("/api/projects/fish/history").json()["versions"][0]
+        self.assertEqual(version["operation"], "migrate")
+        restored = self.post("restore", migrated.json(), version=version["id"])
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["data"]["actions"]["idle"]["sprites"], ["imports/manual.png"])
+        self.assertFalse((self.root / "fish/processed_sprites" / new_ref).exists())
+
+    def test_deleted_source_restores_original_and_derived_files(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        snapshot = self.post("apply", snapshot, source="walk.png").json()
+        source = self.root / "fish/source/walk.png"
+        processed = self.root / "fish/processed_sprites/walk/000.png"
+        source_bytes, processed_bytes = source.read_bytes(), processed.read_bytes()
+        deleted = self.post("delete", snapshot, kind="source", references=["walk.png"]).json()
+        self.assertFalse(source.exists())
+        self.assertFalse(processed.exists())
+        version = self.client.get("/api/projects/fish/history").json()["versions"][0]
+        self.assertEqual(version["operation"], "delete source")
+        restored = self.post("restore", deleted, version=version["id"])
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(source.read_bytes(), source_bytes)
+        self.assertEqual(processed.read_bytes(), processed_bytes)
+
+    def test_invalid_history_archive_cannot_remove_current_pixels(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        applied = self.post("apply", snapshot, source="walk.png").json()
+        processed = self.root / "fish/processed_sprites/walk/000.png"
+        original = processed.read_bytes()
+        version = self.client.get("/api/projects/fish/history").json()["versions"][0]
+        archive = self.root / "fish/.sprite-workbench-history/versions" / version["id"] / "before.zip"
+        archive.write_bytes(b"broken archive")
+        response = self.post("restore", applied, version=version["id"])
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(processed.read_bytes(), original)
+
+    def test_cli_can_list_and_restore_versions_with_shared_guards(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed", filename="manual.png").json()
+        deleted = self.post("delete", snapshot, kind="processed", references=["imports/manual.png"]).json()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(manage(["--workspace-root", str(self.root), "history", "fish"]), 0)
+        version = json.loads(output.getvalue())["versions"][0]["id"]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(manage(["--workspace-root", str(self.root), "restore", "fish", version,
+                                     "--revision", deleted["revision"], "--asset-revision", deleted["asset_revision"]]), 0)
+        self.assertTrue((self.root / "fish/processed_sprites/imports/manual.png").exists())
+
+    def test_history_storage_link_cannot_write_outside_project(self):
+        snapshot = self.create()
+        outside = self.root.parent / "outside-history"
+        outside.mkdir()
+        history_path = self.root / "fish/.sprite-workbench-history"
+        try:
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(outside), str(history_path))
+            else:
+                history_path.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"Directory links unavailable: {error}")
+        response = self.import_image(snapshot, kind="processed", filename="manual.png")
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertFalse(list(outside.iterdir()))
+        self.assertFalse((self.root / "fish/processed_sprites/imports/manual.png").exists())
+
+    def test_history_list_does_not_follow_linked_version_directory(self):
+        self.create()
+        versions = self.root / "fish/.sprite-workbench-history/versions"
+        versions.mkdir(parents=True)
+        outside = self.root.parent / "outside-version"
+        outside.mkdir()
+        (outside / "manifest.json").write_text(json.dumps({"id": "00000000000000000001-abcdef12",
+                                                        "operation": "outside", "created_at": 1,
+                                                        "before": {}, "after": {}}), encoding="utf-8")
+        link = versions / "00000000000000000001-abcdef12"
+        try:
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(outside), str(link))
+            else:
+                link.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"Directory links unavailable: {error}")
+        response = self.client.get("/api/projects/fish/history")
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_failed_automatic_rollback_keeps_recovery_archive(self):
+        from sprite_pipeline.history import ProjectHistory
+
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        snapshot = self.post("apply", snapshot, source="walk.png").json()
+        snapshot["data"]["sources"]["walk.png"]["process"] = {"offset": [1, 0]}
+        with patch("sprite_pipeline.workbench.write_json", side_effect=OSError("config write failed")), \
+             patch.object(ProjectHistory, "_restore_archive", side_effect=OSError("rollback failed")):
+            with self.assertRaisesRegex(OSError, "backup"):
+                self.store.get("fish").apply(snapshot["data"], snapshot["revision"], "walk.png", snapshot["asset_revision"])
+        pending = list((self.root / "fish/.sprite-workbench-history/versions").glob(".pending-*"))
+        self.assertEqual(len(pending), 1)
+        self.assertTrue((pending[0] / "before.zip").is_file())
+
     def test_unchanged_project_requests_reuse_validation_but_external_edits_refresh(self):
         first = self.create()
         with patch("sprite_pipeline.projects.load_config", side_effect=AssertionError("config was revalidated")):

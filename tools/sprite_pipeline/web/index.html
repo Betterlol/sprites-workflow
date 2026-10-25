@@ -16,6 +16,7 @@
     <div class="top-actions">
       <button id="undo" class="icon-button" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
       <button id="redo" class="icon-button" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button>
+      <button id="history-open" class="subtle">版本记录</button>
       <button id="reload" class="subtle">重新载入</button>
       <button id="save">保存工程 <kbd>Ctrl S</kbd></button>
       <button id="export-open" class="primary">导出资源 <span>↗</span></button>
@@ -81,6 +82,11 @@
       <p id="project-create-error" class="error-panel" hidden role="alert"></p>
       <button id="project-create" type="submit" class="primary wide">创建并打开</button>
     </form>
+  </dialog>
+  <dialog id="history-dialog">
+    <div class="dialog-heading"><div><span class="eyebrow">HISTORY</span><h2>版本记录</h2></div><button type="button" id="history-close" class="icon-button" aria-label="关闭版本记录">×</button></div>
+    <p class="muted">图片操作完成后会保留受影响文件的上一版本。恢复前会检查磁盘是否又有修改。</p>
+    <div id="history-list" class="history-list" role="list"></div>
   </dialog>
   <dialog id="export-dialog">
     <form id="export-form"><div class="dialog-heading"><div><span class="eyebrow">EXPORT</span><h2>导出资源</h2></div><button type="button" id="export-close" class="icon-button" aria-label="关闭导出">×</button></div>

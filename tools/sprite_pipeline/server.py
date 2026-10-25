@@ -93,6 +93,10 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
     def get_changes(project_id: str):
         return store.get(project_id).changes()
 
+    @app.get("/api/projects/{project_id}/history")
+    def get_history(project_id: str):
+        return {"versions": store.get(project_id).history_entries()}
+
     @app.get("/api/projects/{project_id}/image")
     def get_image(project_id: str, kind: str, ref: str, v: str | None = None):
         project = store.image_project(project_id)
@@ -110,6 +114,8 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
 
     def operate(project_id: str, operation: str, payload: dict):
         project = store.get(project_id)
+        if operation == "restore":
+            return project.restore(payload["version"], payload.get("revision"), payload.get("asset_revision"))
         data = payload["data"]
         revision = payload.get("revision")
         assets = payload.get("asset_revision")

@@ -23,6 +23,12 @@ class Element {
     if (selector === '[data-project]') return [...this.innerHTML.matchAll(/data-project="([^"]+)"/g)].map(([,id]) => {
       const button = new Element(); button.dataset.project = id; return this.projectButtons?.find(b => b.dataset.project === id) || button;
     });
+    if (selector === '[data-version]') {
+      this.historyButtons ||= [...this.innerHTML.matchAll(/data-version="([^"]+)"/g)].map(([,id]) => {
+        const button = new Element(); button.dataset.version = id; return button;
+      });
+      return this.historyButtons;
+    }
     return [];
   }
   setAttribute() {}
@@ -105,6 +111,10 @@ const context = {
         project.revision += '-delete'; project.asset_revision += '-delete'; result = {...project,deleted:payload.references.length};
       }
       else if (operation === 'changes') result = {revision:project.revision,asset_revision:project.asset_revision};
+      else if (operation === 'history') result = {versions:[{id:'version-one',operation:'apply',created_at:1,files:2}]};
+      else if (operation === 'restore') {
+        project.revision += '-restored'; project.asset_revision += '-restored'; result = project;
+      }
       else if (operation === 'preview') {
         const body = JSON.parse(options.body);
         previewRequests.push(body.source);
@@ -207,6 +217,12 @@ assert.equal(state.references.length,2); assert.equal(state.reference,'reference
 assert.equal(activeSteps().length,0); assert.equal(player.sourceView.url,'/refs/identity.png');
 await elements.get('delete-item').onclick();
 assert.equal(state.references.length,1); assert.equal(state.reference,'references/style.png');
+await elements.get('history-open').onclick();
+assert(elements.get('history-dialog').open);
+assert.match(elements.get('history-list').innerHTML,/version-one/);
+await elements.get('history-list').querySelectorAll('[data-version]')[0].onclick();
+assert.match(state.revision,/restored/);
+assert(!elements.get('history-dialog').open);
 const {previewSource} = context.hooks;
 state.sources = ['sheet.png','slow.png','fast.png'].map(file => ({file,url:'/sources/' + file,size:[16,16]}));
 for (const source of state.sources) state.data.sources[source.file] = {};
