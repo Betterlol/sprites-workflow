@@ -6,3 +6,4 @@ __pycache__/
 **/.sprite-project-*/
 **/.sprite-delete-*/
 workspaces/*/exports/
+.superpowers/

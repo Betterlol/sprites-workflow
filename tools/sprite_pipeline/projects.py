@@ -70,6 +70,15 @@ class ProjectStore:
                 self.cache[path] = Project(path, project_id=project_id)
             return self.cache[path]
 
+    def image_project(self, project_id: str) -> Project:
+        """Reuse validated image roots while the config file is unchanged."""
+        path = self.config_path(project_id)
+        with self.lock:
+            project = self.cache.get(path)
+        if project is not None and project.config_signature() == project._image_config_signature:
+            return project
+        return self.get(project_id)
+
     def describe(self, project_id: str) -> dict:
         project = self.get(project_id)
         cfg = load_config(project.path)

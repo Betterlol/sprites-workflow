@@ -117,6 +117,48 @@ class ProjectWorkflowTests(unittest.TestCase):
         self.assertEqual(self.snapshot("b")["data"]["notes"], ["b"])
         self.assertEqual(self.client.get("/api/project").status_code, 400)
 
+    def test_versioned_images_are_cacheable_without_revalidating_unchanged_config(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed").json()
+        url = snapshot["assets"][0]["url"]
+        with patch("sprite_pipeline.projects.load_config", wraps=load_config) as store_load, \
+             patch("sprite_pipeline.workbench.load_config", wraps=load_config) as image_load:
+            first = self.client.get(url)
+            loads_after_first = store_load.call_count + image_load.call_count
+            second = self.client.get(url)
+            self.assertEqual(store_load.call_count + image_load.call_count, loads_after_first)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.content, first.content)
+        self.assertIn("immutable", first.headers["cache-control"])
+        self.assertEqual(self.client.get("/api/projects/fish/changes").headers["cache-control"], "no-store")
+        self.assertEqual(self.client.get("/static/app.js").headers["cache-control"], "private, no-cache")
+
+        image_path = self.root / "fish/processed_sprites/imports/pose.png"
+        original_stat = image_path.stat()
+        Image.new("RGBA", (32, 32), "blue").save(image_path)
+        os.utime(image_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1000000))
+        stale = self.client.get(url)
+        self.assertEqual(stale.headers["cache-control"], "no-store")
+        self.assertEqual(Image.open(io.BytesIO(stale.content)).getpixel((0, 0)), (0, 0, 255, 255))
+        fresh_url = self.snapshot()["assets"][0]["url"]
+        self.assertNotEqual(fresh_url, url)
+        self.assertIn("immutable", self.client.get(fresh_url).headers["cache-control"])
+
+    def test_image_paths_refresh_after_external_config_change(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed").json()
+        url = snapshot["assets"][0]["url"]
+        self.assertEqual(self.client.get(url).status_code, 200)
+        config_path = self.root / "fish/pipeline.json"
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        data["paths"]["processed_sprites"] = "other_processed"
+        write_json(config_path, data)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.get("/api/projects/fish/image", params={"kind": "processed", "ref": "../source/pose.png"}).status_code, 400)
+        data["paths"]["source"] = "../outside"
+        write_json(config_path, data)
+        self.assertEqual(self.client.get(url).status_code, 400)
+
     def test_names_creation_failures_and_isolation(self):
         original = self.create()
         for project_id in ("FISH", "../escape", "CON", "aux.png", "name.", "bad/name", "@config"):

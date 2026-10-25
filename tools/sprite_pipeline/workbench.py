@@ -124,7 +124,12 @@ class Project:
         self.path = path.resolve()
         self.project_id = project_id
         self.lock = project_lock(self.path)
-        load_config(self.path)
+        self._image_config = load_config(self.path)
+        self._image_config_signature = self.config_signature()
+
+    def config_signature(self) -> tuple[int, int]:
+        stat = self.path.stat()
+        return stat.st_mtime_ns, stat.st_size
 
     @property
     def revision(self) -> str:
@@ -168,7 +173,11 @@ class Project:
         return cfg
 
     def image_path(self, kind: str, reference: str) -> Path:
-        cfg = load_config(self.path)
+        signature = self.config_signature()
+        if signature != self._image_config_signature:
+            self._image_config = load_config(self.path)
+            self._image_config_signature = signature
+        cfg = self._image_config
         roots = {"source": cfg.source, "processed": cfg.directory("processed_sprites"), "reference": self.path.parent}
         if kind not in roots:
             raise ValueError("Unknown image category")

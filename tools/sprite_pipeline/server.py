@@ -39,7 +39,9 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
                 return JSONResponse({"error": "Request exceeds 64 MiB"}, status_code=413)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Cache-Control"] = "no-store"
+        if "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = ("private, no-cache" if request.url.path.startswith("/static/")
+                                                 else "no-store")
         return response
 
     @app.exception_handler(ConflictError)
@@ -84,10 +86,14 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
         return store.get(project_id).changes()
 
     @app.get("/api/projects/{project_id}/image")
-    def get_image(project_id: str, kind: str, ref: str):
-        project = store.get(project_id)
+    def get_image(project_id: str, kind: str, ref: str, v: str | None = None):
+        project = store.image_project(project_id)
         with project.lock:
-            return FileResponse(project.image_path(kind, ref))
+            path = project.image_path(kind, ref)
+            stat = path.stat()
+            current_version = f"{stat.st_mtime_ns}-{stat.st_size}"
+            cache_control = "private, max-age=31536000, immutable" if v == current_version else "no-store"
+            return FileResponse(path, headers={"Cache-Control": cache_control})
 
     def operate(project_id: str, operation: str, payload: dict):
         project = store.get(project_id)
@@ -133,8 +139,8 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
         return snapshot(initial_id())
 
     @app.get("/api/image")
-    def legacy_image(kind: str, ref: str):
-        return get_image(initial_id(), kind, ref)
+    def legacy_image(kind: str, ref: str, v: str | None = None):
+        return get_image(initial_id(), kind, ref, v)
 
     @app.post("/api/{operation}")
     def legacy_operation(operation: str, payload: dict = Body(...)):
