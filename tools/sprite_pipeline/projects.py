@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from .config import NAME, PROJECT_PATHS, config_from_data, inside, load_config
+from .config import Config, NAME, PROJECT_PATHS, config_from_data, inside, load_config
 from .files import write_json
 from .locking import project_lock
 from .workbench import ConflictError, Project
@@ -33,7 +33,8 @@ class ProjectStore:
     def __init__(self, root: Path = DEFAULT_WORKSPACES, config_path: Path | None = None):
         self.root = root.resolve()
         self.cache: dict[Path, Project] = {}
-        self._validated: dict[Path, tuple[int, int]] = {}
+        self._validated: dict[Path, str] = {}
+        self._validated_config: dict[Path, Config] = {}
         self.lock = threading.RLock()
         self.initial_id = None
         self.external = None
@@ -65,9 +66,12 @@ class ProjectStore:
         with self.lock:
             cached = self.cache.get(path)
             if cached is not None and self._validated.get(path) == cached.config_signature():
+                if project_id != EXTERNAL_ID:
+                    source = self._validated_config[path].source
+                    if not source.is_relative_to(path.parent) or source == path.parent:
+                        raise ValueError("工作区工程的 source 必须位于工程目录内；旧布局请使用 --config 打开。")
                 return cached
-        before = path.stat()
-        signature = (before.st_mtime_ns, before.st_size)
+        signature = hashlib.sha256(path.read_bytes()).hexdigest()
         cfg = load_config(path)
         if project_id != EXTERNAL_ID:
             if not cfg.source.is_relative_to(path.parent) or cfg.source == path.parent:
@@ -78,6 +82,7 @@ class ProjectStore:
             if self.cache[path].config_signature() != signature:
                 raise ConflictError("工程配置正在变化，请稍后重试。")
             self._validated[path] = signature
+            self._validated_config[path] = cfg
             return self.cache[path]
 
     def image_project(self, project_id: str) -> Project:

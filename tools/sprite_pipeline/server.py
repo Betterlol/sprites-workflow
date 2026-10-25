@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import mimetypes
 import secrets
 from pathlib import Path
 
@@ -97,10 +98,15 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
         project = store.image_project(project_id)
         with project.lock:
             path = project.image_path(kind, ref)
-            stat = path.stat()
-            current_version = f"{stat.st_mtime_ns}-{stat.st_size}"
+            before = path.stat()
+            content = path.read_bytes()
+            after = path.stat()
+            if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
+                raise ConflictError("图片在读取时发生变化，请重试。")
+            current_version = f"{after.st_mtime_ns}-{after.st_size}"
             cache_control = "private, max-age=31536000, immutable" if v == current_version else "no-store"
-            return FileResponse(path, headers={"Cache-Control": cache_control})
+            media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            return Response(content, media_type=media_type, headers={"Cache-Control": cache_control})
 
     def operate(project_id: str, operation: str, payload: dict):
         project = store.get(project_id)

@@ -199,6 +199,101 @@ class ProjectWorkflowTests(unittest.TestCase):
         write_json(config_path, updated)
         self.assertEqual(self.client.get("/api/projects/fish").status_code, 400)
 
+    def test_same_stat_external_config_edit_cannot_bypass_workspace_path_validation(self):
+        self.create()
+        config_path = self.root / "fish/pipeline.json"
+        before = config_path.stat()
+        original = config_path.read_bytes()
+        self.assertIn(b'"source": "source"', original)
+        config_path.write_bytes(original.replace(b'"source": "source"', b'"source": "../bad"', 1))
+        os.utime(config_path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(config_path.stat().st_size, before.st_size)
+        self.assertEqual(config_path.stat().st_mtime_ns, before.st_mtime_ns)
+        self.assertEqual(self.client.get("/api/projects/fish").status_code, 400)
+
+    def test_cached_project_rejects_source_directory_replaced_by_external_link(self):
+        self.create()
+        outside = self.root.parent / "outside"
+        outside.mkdir()
+        Image.new("RGBA", (16, 16), "red").save(outside / "secret.png")
+        source = self.root / "fish/source"
+        source.rmdir()
+        try:
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(outside), str(source))
+            else:
+                source.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"Directory links unavailable: {error}")
+        self.assertEqual(self.client.get("/api/projects/fish").status_code, 400)
+        self.assertEqual(self.client.get("/api/projects/fish/image", params={"kind": "source", "ref": "secret.png"}).status_code, 400)
+
+    def test_revalidated_source_path_is_checked_after_link_replacement(self):
+        self.create()
+        config_path = self.root / "fish/pipeline.json"
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        data["paths"]["source"] = "newsource"
+        write_json(config_path, data)
+        newsource = self.root / "fish/newsource"
+        newsource.mkdir()
+        self.assertEqual(self.snapshot()["project"]["id"], "fish")
+
+        outside = self.root.parent / "outside"
+        outside.mkdir()
+        Image.new("RGBA", (16, 16), "red").save(outside / "private.png")
+        newsource.rmdir()
+        try:
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(outside), str(newsource))
+            else:
+                newsource.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"Directory links unavailable: {error}")
+        self.assertEqual(self.client.get("/api/projects/fish").status_code, 400)
+
+    def test_workspace_project_state_checks_source_containment_itself(self):
+        self.create()
+        config_path = self.root / "fish/pipeline.json"
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        data["paths"]["source"] = "../outside"
+        write_json(config_path, data)
+        project = Project(config_path, project_id="fish")
+        with self.assertRaisesRegex(ValueError, "source 必须位于工程目录内"):
+            project.state()
+
+    def test_versioned_image_keeps_its_bytes_if_file_changes_before_response_send(self):
+        from starlette.responses import FileResponse, Response
+
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed", color="red").json()
+        url = snapshot["assets"][0]["url"]
+        image_path = self.root / "fish/processed_sprites/imports/pose.png"
+        replaced = []
+        file_call = FileResponse.__call__
+        response_call = Response.__call__
+
+        def replace_pixels():
+            if not replaced:
+                Image.new("RGBA", (32, 32), "blue").save(image_path)
+                replaced.append(True)
+
+        async def call_file(response, scope, receive, send):
+            replace_pixels()
+            return await file_call(response, scope, receive, send)
+
+        async def call_response(response, scope, receive, send):
+            if scope["path"].endswith("/image"):
+                replace_pixels()
+            return await response_call(response, scope, receive, send)
+
+        with patch.object(FileResponse, "__call__", call_file), patch.object(Response, "__call__", call_response):
+            result = self.client.get(url)
+        self.assertTrue(replaced)
+        self.assertIn("immutable", result.headers["cache-control"])
+        self.assertEqual(Image.open(io.BytesIO(result.content)).getpixel((0, 0)), (255, 0, 0, 255))
+
     def test_names_creation_failures_and_isolation(self):
         original = self.create()
         for project_id in ("FISH", "../escape", "CON", "aux.png", "name.", "bad/name", "@config"):

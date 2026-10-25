@@ -128,9 +128,14 @@ class Project:
         self._image_config_signature = self.config_signature()
         self._asset_metadata: dict[Path, tuple[tuple[int, int], list[int], tuple[int, int, int, int] | None]] = {}
 
-    def config_signature(self) -> tuple[int, int]:
-        stat = self.path.stat()
-        return stat.st_mtime_ns, stat.st_size
+    def config_signature(self) -> str:
+        return self.revision
+
+    def validate_source_location(self, cfg: Config) -> None:
+        if self.project_id not in (None, "@config"):
+            source = cfg.source
+            if not source.is_relative_to(self.path.parent) or source == self.path.parent:
+                raise ValueError("工作区工程的 source 必须位于工程目录内；旧布局请使用 --config 打开。")
 
     @property
     def revision(self) -> str:
@@ -179,6 +184,7 @@ class Project:
             self._image_config = load_config(self.path)
             self._image_config_signature = signature
         cfg = self._image_config
+        self.validate_source_location(cfg)
         roots = {"source": cfg.source, "processed": cfg.directory("processed_sprites"), "reference": self.path.parent}
         if kind not in roots:
             raise ValueError("Unknown image category")
@@ -200,6 +206,7 @@ class Project:
         with self.lock:
             raw = self.path.read_bytes()
             cfg = config_from_data(json.loads(raw), self.path)
+            self.validate_source_location(cfg)
             assets = []
             root = cfg.directory("processed_sprites")
             present_assets = set()
