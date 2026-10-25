@@ -56,7 +56,7 @@ source/ → source_sprites/ → processed_sprites/ → sprites/ → spritesheets
 - `actions.<动作>.sprites` 配置已处理素材的组装顺序。
 - `actions.<动作>.animation` 配置 WebP 的播放顺序、逐帧时长和循环次数，独立于游戏运行时的播放参数。
 
-source 只放原始生成图；切出的单帧、复制的起止帧和处理结果都不要放回 source。
+`source/` 保存确认采用的原画，包括动作 spritesheet 和单帧修复原图；切出的缓存帧、复制的起止帧和 processed 输出不要回填到 `source/`。
 
 ## 使用方法
 
@@ -123,7 +123,7 @@ python tools/projects.py export dafeiyu --format all --exclude-action eat_rice_l
 
 `source_sprites/`、工程锁、临时文件和工作区工程的 `exports/` 通过 [.gitignore](.gitignore) 忽略。`pipeline.json`、`source/`、`references/`、工程说明和 `processed_sprites/` 默认保留，应一起提交或备份。
 
-**使用网页工作台时，不要随意清空 processed。** 人工修图建议放入 `processed_sprites/imports/` 并修改动作引用，避免“应用处理”覆盖原图对应目录中的修图。
+**使用网页工作台时，不要随意清空 processed。** 新采纳的人工修图也先作为原图导入 `source/`，再切图、处理并更新动作引用；已有 `processed_sprites/imports/` 素材作为历史兼容保留，避免在原图对应的 processed 目录中直接修图后被“应用处理”覆盖。
 
 可复现的处理调整应写入配置；交付文件按需导出，默认不作为工程的唯一数据来源。协作约定和命令见 [工作区说明](workspaces/README.md)。
 

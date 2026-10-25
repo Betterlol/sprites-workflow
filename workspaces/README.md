@@ -5,12 +5,12 @@
 | 路径 | 约定 |
 | --- | --- |
 | `pipeline.json` | 共享配置：展示名称、画布、锚点、切图与处理规则、动作引用和 Review |
-| `source/` | 原始图片；可从网页导入，也可由人或 Agent 直接添加 |
+| `source/` | 确认采用的原画，包括动作 spritesheet 和单帧修复原图；先导入此处再切图、处理 |
 | `source_sprites/` | CLI 原尺寸切片缓存，可重建，Git 忽略 |
 | `processed_sprites/` | 动作实际引用的素材与 `_stage.json`，默认提交或备份 |
-| `processed_sprites/imports/` | 人工修图和外部导入单帧，必须与工程画布一致 |
+| `processed_sprites/imports/` | 兼容已有的人工修图或外部处理帧；不作为新素材的常规入口 |
 | `processed_sprites/_approved/` | 已确认的历史最终帧 |
-| `references/` | 人设、参考图片、生成提示词等，不参与自动切图；网页可批量导入和管理参考图 |
+| `references/` | 用户初始参考图、确认后的 idle 基准图及必要记录；不放候选图和迭代图，也不参与自动切图 |
 | `README.md` | 工程说明、角色约束和待办 |
 | `exports/` | CLI 按需生成的帧、图集、预览、元数据和 manifest；Git 默认忽略 |
 
@@ -68,8 +68,8 @@ python tools/build_sprites.py pack --config workspaces/dafeiyu/pipeline.json
 
 ## 人与 Agent 协作
 
-1. 双方共用磁盘文件。原图放 `source/`，参考资料放 `references/`，不要把参考图放进原图扫描目录。
-2. 处理调整优先写规则；独立修图放入 `processed_sprites/imports/`，动作通过相对路径引用。不要为调整动作顺序重命名素材编号。
+1. 双方共用磁盘文件。用户参考图和确认后的 idle 基准图放 `references/`；后续动作优先以该 idle 为形象、大小和色彩基准。不要把参考图放进原图扫描目录。
+2. 候选图和迭代文件放在独立工作目录（如工程内 `_work/<task>/`），不要堆在 `references/` 或 `source/`。确认采用的原画先导入 `source/`，包括单帧修复，再按规则切图、处理；不要为调整动作顺序重命名素材编号。
 3. 网页、管理 CLI、分阶段 CLI 共用 `.sprite-workbench.lock`。锁文件会保留，实际锁由系统随进程释放，不需要手动删除。
 4. 直接写文件不会自动遵守锁。优先使用管理 CLI；必须手工修改时先写临时文件再替换，并刷新网页确认外部变化。两边不要同时编辑同一配置。
 5. 网页有草稿时不会静默覆盖；图片变化可刷新素材，配置冲突可先下载草稿再合并。
