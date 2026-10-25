@@ -282,11 +282,11 @@ class Project:
 
     def preview(self, data: dict, filename: str) -> dict:
         with self.lock:
-            cfg, raw, frames, descriptors, scale = self.render(data, filename)
+            cfg, _raw, frames, descriptors, scale = self.render(data, filename)
             return {"scale": scale, "frames": [
                 {"id": Path(item["file"]).stem, "ref": cfg.source_id(filename) + "/" + item["file"],
                  "box": item["source_box"], "url": data_url(frames[item["file"]]),
-                 "raw_url": data_url(raw[Path(item["file"]).stem]), "bbox": frames[item["file"]].getbbox()}
+                 "bbox": frames[item["file"]].getbbox()}
                 for item in descriptors]}
 
     def apply(self, data: dict, revision: str, filename: str, asset_revision: str | None = None) -> dict:

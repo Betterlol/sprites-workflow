@@ -26,4 +26,33 @@ assert.equal(action.animation.durations_ms.at(-1),62);
 data.workbench = {reviews:{sample:{mode:'runtime',clips:[{action:'rest',start:9,end:10,repeat:1}]}}};
 reconcileReviewRanges(data);
 assert.deepEqual(data.workbench.reviews.sample.clips[0],{action:'rest',start:0,end:0,repeat:1});
+const playerSource = await readFile(new URL('../tools/sprite_pipeline/web/player.js',import.meta.url),'utf8');
+const {Player} = await import('data:text/javascript;base64,' + Buffer.from(playerSource).toString('base64'));
+let imageCount = 0;
+globalThis.Image = class {
+  constructor() { imageCount++; this.complete = false; this.naturalWidth = 0; this.listeners = {}; }
+  set src(value) { this.url = value; }
+  addEventListener(type, callback) { (this.listeners[type] ||= []).push(callback); }
+  load() { this.complete = true; this.naturalWidth = 16; for (const callback of this.listeners.load || []) callback(); }
+};
+globalThis.ResizeObserver = class { observe() {} };
+globalThis.document = {addEventListener() {}};
+globalThis.requestAnimationFrame = () => 1;
+const context2d = {clearRect() {},drawImage() {},save() {},restore() {},setLineDash() {},beginPath() {},moveTo() {},lineTo() {},stroke() {},arc() {},fillText() {}};
+const canvas = {getContext:() => context2d,style:{},width:16,height:16};
+const player = new Player(canvas,{clientWidth:300,clientHeight:300},() => {});
+player.options.guides = false;
+const longSteps = Array.from({length:100},(_,i) => ({url:`/frame/${i}`,duration_ms:100}));
+player.setSteps(longSteps);
+assert(imageCount <= 8,`Long sequence eagerly loaded ${imageCount} images`);
+player.images.get('/frame/0').load();
+await Promise.resolve();
+assert.equal(player.loading,false,'Playback should start when the current frame is ready');
+player.toggle();
+player.tick(0); player.tick(100);
+assert.equal(player.index,0,'Playback must hold the visible frame while the next image loads');
+assert.equal(player.loading,true);
+player.images.get('/frame/1').load();
+player.tick(200);
+assert.equal(player.index,1,'Playback resumes at the next frame after it loads');
 console.log('Workbench model: timing, review boundaries and display remapping passed.');

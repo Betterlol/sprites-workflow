@@ -63,13 +63,16 @@ const snapshot = id => ({data:{version:2,project:{name:id},character:id,frame_si
   revision:'r-' + id,asset_revision:'a-' + id,sources:[],assets:[],references:[],legacy_count:0,project:{id,name:id,directory:'/workspaces/' + id},warnings:[]});
 const projects = new Map([['alpha',snapshot('alpha')],['beta',snapshot('beta')]]);
 const requests = [];
+const intervals = [];
+const previewRequests = [];
+let releaseSlowPreview = null;
 let allowDiscard = true;
 let pausedProject = null, resumeSnapshot = null;
 const context = {
-  ...model, Player, document, structuredClone, URL, URLSearchParams, Blob,
+  ...model, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
   FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,cGl4ZWxz'; queueMicrotask(() => this.onload()); } },
   location:{pathname:'/',search:''}, history:{replaceState() {}},
-  window:{addEventListener() {}}, setTimeout:() => 1, clearTimeout() {}, setInterval() {},
+  window:{addEventListener() {}}, setTimeout:() => 1, clearTimeout() {}, setInterval:(_,delay) => intervals.push(delay),
   confirm:() => allowDiscard, console,
   fetch:async (url, options = {}) => {
     requests.push({url,options});
@@ -102,6 +105,12 @@ const context = {
         project.revision += '-delete'; project.asset_revision += '-delete'; result = {...project,deleted:payload.references.length};
       }
       else if (operation === 'changes') result = {revision:project.revision,asset_revision:project.asset_revision};
+      else if (operation === 'preview') {
+        const body = JSON.parse(options.body);
+        previewRequests.push(body.source);
+        if (body.source === 'slow.png') await new Promise(resolve => { releaseSlowPreview = resolve; });
+        result = {scale:1,frames:[{id:'000',ref:body.source.replace('.png','/000.png'),box:[0,0,8,8],url:'/preview/' + body.source,bbox:[0,0,8,8]}]};
+      }
       else {
         assert(!operation,`Unexpected operation ${operation}`);
         if (pausedProject === id) await new Promise(resolve => { resumeSnapshot = resolve; });
@@ -113,11 +122,12 @@ const context = {
 };
 let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import.meta.url),'utf8');
 source = source.replace(/^import .*\n/gm,'');
-source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps};';
+source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource};';
 vm.runInNewContext(source,context,{filename:'app.js'});
 const flush = () => new Promise(resolve => setImmediate(resolve));
 await flush();
 const {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player} = context.hooks;
+assert(intervals.includes(12000),'Background checks should use a longer idle interval');
 assert(body.classList.contains('project-home'));
 assert.match(elements.get('project-list').innerHTML,/alpha/);
 await openProject('alpha');
@@ -197,4 +207,17 @@ assert.equal(state.references.length,2); assert.equal(state.reference,'reference
 assert.equal(activeSteps().length,0); assert.equal(player.sourceView.url,'/refs/identity.png');
 await elements.get('delete-item').onclick();
 assert.equal(state.references.length,1); assert.equal(state.reference,'references/style.png');
+const {previewSource} = context.hooks;
+state.sources = ['sheet.png','slow.png','fast.png'].map(file => ({file,url:'/sources/' + file,size:[16,16]}));
+for (const source of state.sources) state.data.sources[source.file] = {};
+state.source = 'sheet.png'; mode('source');
+await previewSource(); await previewSource();
+assert.equal(previewRequests.filter(source => source === 'sheet.png').length,1,'Unchanged preview should be reused');
+state.data.sources['sheet.png'].process = {offset:[1,0]};
+await previewSource();
+assert.equal(previewRequests.filter(source => source === 'sheet.png').length,2,'Recipe edits need a fresh preview');
+state.source = 'slow.png'; const slowPreview = previewSource(); await flush();
+state.source = 'fast.png'; await previewSource();
+releaseSlowPreview(); await slowPreview;
+assert.equal(state.previewSource,'fast.png','Late preview must not replace the selected source');
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');

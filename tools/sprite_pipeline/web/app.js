@@ -12,7 +12,8 @@ const state = {mode:'action', data:null, revision:null, token:null, assets:[], s
   selected:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewError:null,
   history:[], future:[], saved:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false,
   assetSelection:new Set(), libraryMulti:false, lastAsset:null};
-let previewTimer, toastTimer;
+let previewTimer, toastTimer, previewRequest;
+const previewCache = new Map();
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
 function toast(message, error = false) {
@@ -20,12 +21,14 @@ function toast(message, error = false) {
   $('#status-message').textContent = message;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { box.hidden = true; }, error ? 10000 : 4000);
 }
-async function api(path, payload, binary = false) {
+async function api(path, payload, binary = false, signal) {
   const route = path.startsWith('projects') || !state.projectId ? path
     : `projects/${encodeURIComponent(state.projectId)}${path === 'project' ? '' : '/' + path}`;
-  const response = await fetch(`/api/${route}`, payload === undefined ? {} : {
+  const options = payload === undefined ? {} : {
     method:'POST', headers:{'Content-Type':'application/json','X-Workbench-Token':state.token}, body:JSON.stringify(payload),
-  });
+  };
+  if (signal) options.signal = signal;
+  const response = await fetch(`/api/${route}`, options);
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
     const error = new Error(detail.error || (typeof detail.detail === 'string' ? detail.detail : JSON.stringify(detail.detail)) || `请求失败 (${response.status})`);
@@ -69,6 +72,7 @@ function change(operation, {render = true, preview = false} = {}) {
   if (render) renderAll(); else updateSaveStatus();
 }
 function setSnapshot(snapshot) {
+  previewRequest?.controller.abort(); previewRequest = null;
   state.data = snapshot.data; state.revision = snapshot.revision; state.assets = snapshot.assets; state.sources = snapshot.sources;
   state.references = snapshot.references || []; reconcileMaterials();
   state.assetRevision = snapshot.asset_revision; state.externalChange = false; $('#external-change').hidden = true;
@@ -219,7 +223,7 @@ $('#draft-download').onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url),1000);
 };
 window.addEventListener('focus',checkExternalChanges);
-setInterval(checkExternalChanges,3000);
+setInterval(checkExternalChanges,12000);
 async function save() {
   return task('正在保存工程…', async () => {
     const result = await api('save', payload()); state.revision = result.revision; state.saved = JSON.stringify(state.data); toast('工程已保存');
@@ -397,7 +401,7 @@ function renderTimeline() {
     if (ref) addAsset(ref); else if (action && state.mode === 'review') addClip(action);
     else if (original !== '') moveTimeline(Number(original), cards.length - 1);
   };
-  $('#source-preview')?.addEventListener('click', () => previewSource());
+  $('#source-preview')?.addEventListener('click', () => previewSource(true));
   $('#duplicate-frame')?.addEventListener('click', duplicateFrame);
   $('#reverse-frames')?.addEventListener('click', reverseFrames);
   $('#remove-frame')?.addEventListener('click', removeFrame);
@@ -603,23 +607,43 @@ function bindSourceInspector() {
   });
 }
 function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(() => previewSource(),350); }
-async function previewSource() {
+function previewKey(source) {
+  return JSON.stringify([state.projectId, source, sourceInfo()?.url, state.assetRevision,
+    state.data.frame_size, state.data.anchor, state.data.defaults?.extract, state.data.defaults?.process,
+    state.data.sources?.[source]]);
+}
+function showPreview(result, source) {
+  state.preview = result; state.previewSource = source; state.previewError = null;
+  state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
+  if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); }
+  $('#status-message').textContent = `处理预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
+}
+async function previewSource(force = false) {
   if (!state.source) return;
-  const epoch = ++state.previewEpoch, source = state.source, data = clone(state.data);
+  const epoch = ++state.previewEpoch, source = state.source, key = previewKey(source);
+  if (force) previewCache.delete(key);
+  if (previewCache.has(key)) { showPreview(previewCache.get(key),source); return; }
   $('#status-message').textContent = '正在预览切图和处理结果…';
+  let request = previewRequest;
+  if (!request || request.key !== key || force) {
+    request?.controller.abort();
+    const controller = new AbortController();
+    request = {key,controller,promise:api('preview',{data:clone(state.data),source},false,controller.signal)};
+    previewRequest = request;
+  }
   try {
-    const result = await api('preview',{data,source});
+    const result = await request.promise;
+    previewCache.delete(key); previewCache.set(key,result);
+    if (previewCache.size > 4) previewCache.delete(previewCache.keys().next().value);
     if (epoch !== state.previewEpoch || source !== state.source) return;
-    state.preview = result; state.previewSource = source; state.previewError = null;
-    state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
-    if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); }
-    $('#status-message').textContent = `处理预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
+    showPreview(result,source);
   } catch (error) {
+    if (error.name === 'AbortError') return;
     if (epoch !== state.previewEpoch) return;
     state.previewError = error.message;
     if (state.mode === 'source') renderInspector();
     $('#status-message').textContent = '预览失败：' + error.message;
-  }
+  } finally { if (previewRequest === request) previewRequest = null; }
 }
 
 function reviewInspector() {

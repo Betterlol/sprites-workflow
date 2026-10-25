@@ -85,6 +85,7 @@ class WorkbenchTests(unittest.TestCase):
         response = self.post("preview", source="walk.png")
         self.assertEqual(response.status_code, 200, response.text)
         frame = response.json()["frames"][0]
+        self.assertNotIn("raw_url", frame)
         image = Image.open(io.BytesIO(base64.b64decode(frame["url"].split(",", 1)[1]))).convert("RGBA")
         self.assertEqual(image.getbbox(), (5, 4, 13, 12))
         self.assertEqual(self.path.read_bytes(), before)

@@ -49,25 +49,40 @@ export class Player {
     this.index = Math.min(Math.max(0, index), Math.max(0, steps.length - 1));
     this.elapsed = 0;
     this.last = null;
-    // Preload the whole sequence before advancing the clock. Missing poses are
-    // visibly flagged by the editor rather than silently skipped.
     const epoch = ++this.loadEpoch;
-    const urls = [...new Set(steps.map(step => step.url || this.assets?.get(step.ref)?.url).filter(Boolean))];
-    this.loading = true;
-    Promise.all(urls.map(url => {
-      const image = this.image(url);
-      return image.complete ? Promise.resolve() : new Promise(resolve => {
-        image.addEventListener('load', resolve, {once: true});
-        image.addEventListener('error', resolve, {once: true});
-      });
-    })).then(() => { if (epoch === this.loadEpoch) { this.loading = false; this.last = null; this.draw(); } });
+    this.prefetch(this.index);
+    this.waitForCurrent(epoch);
     this.onStep(this.index);
     this.draw();
+  }
+  stepImage(index) {
+    const step = this.steps[index];
+    return step ? this.image(step.url || this.assets?.get(step.ref)?.url) : null;
+  }
+  prefetch(index) {
+    for (let offset = 0; offset < Math.min(8, this.steps.length); offset++) {
+      const next = index + offset;
+      if (next >= this.steps.length && !this.loop) break;
+      this.stepImage(next % this.steps.length);
+    }
+  }
+  waitForCurrent(epoch) {
+    const image = this.stepImage(this.index);
+    this.loading = !!image && !image.complete;
+    if (!this.loading) { this.last = null; this.draw(); return; }
+    const ready = () => {
+      if (epoch === this.loadEpoch) { this.loading = false; this.last = null; this.draw(); }
+    };
+    image.addEventListener('load', ready, {once: true});
+    image.addEventListener('error', ready, {once: true});
   }
   seek(index) {
     this.index = Math.max(0, Math.min(index, this.steps.length - 1));
     this.elapsed = 0;
     this.last = null;
+    const epoch = ++this.loadEpoch;
+    this.prefetch(this.index);
+    this.waitForCurrent(epoch);
     this.onStep(this.index);
     this.draw();
   }
@@ -135,16 +150,34 @@ export class Player {
       if (this.last !== null) this.elapsed += (timestamp - this.last) * this.speed;
       let changed = false, guard = 0;
       while (this.elapsed >= this.steps[this.index].duration_ms && guard++ < 10000) {
-        this.elapsed -= this.steps[this.index].duration_ms;
-        if (this.index + 1 >= this.steps.length) {
-          if (this.loop) this.index = 0;
-          else { this.playing = false; this.elapsed = 0; changed = true; break; }
-        } else this.index++;
+        const duration = this.steps[this.index].duration_ms;
+        if (this.index + 1 >= this.steps.length && !this.loop) {
+          this.playing = false; this.elapsed = 0; changed = true; break;
+        }
+        const nextIndex = (this.index + 1) % this.steps.length;
+        const nextImage = this.stepImage(nextIndex);
+        if (nextImage && !nextImage.complete) {
+          this.elapsed = duration;
+          this.waitForCurrentFrame(nextImage);
+          break;
+        }
+        this.elapsed -= duration;
+        this.index = nextIndex;
+        this.prefetch(this.index);
         changed = true;
       }
       if (changed) { this.onStep(this.index); this.draw(); }
     }
     this.last = timestamp;
     requestAnimationFrame(t => this.tick(t));
+  }
+  waitForCurrentFrame(image) {
+    this.loading = true;
+    const epoch = this.loadEpoch;
+    const ready = () => {
+      if (epoch === this.loadEpoch) { this.loading = false; this.last = null; }
+    };
+    image.addEventListener('load', ready, {once: true});
+    image.addEventListener('error', ready, {once: true});
   }
 }
