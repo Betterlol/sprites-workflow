@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .config import load_config
+from .composition_check import compare_composition
 from .projects import DEFAULT_WORKSPACES, ProjectStore
 from .qa import render_qa
 from .workbench import ConflictError, validate_editor
@@ -68,6 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     restore.add_argument("version", help="Version ID returned by history")
     restore.add_argument("--revision", help="Expected config revision, if already inspected")
     restore.add_argument("--asset-revision", help="Expected material revision, if already inspected")
+    composition = commands.add_parser("check-composition", help="Compare an action with a runtime Review or timed sequence")
+    composition.add_argument("project")
+    composition.add_argument("--action", required=True, help="Complete runtime action")
+    expected = composition.add_mutually_exclusive_group(required=True)
+    expected.add_argument("--review", help="Saved runtime Review of the component parts")
+    expected.add_argument("--sequence", type=Path, help="Explicit JSON playback sequence")
     args = parser.parse_args(argv)
     try:
         store = ProjectStore(args.workspace_root)
@@ -115,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
                     result = render_qa(cfg, action=args.action, review=args.review,
                                        references=args.references, sequence=sequence,
                                        mode=args.mode, output=args.output)
+                elif args.command == "check-composition":
+                    sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
+                    result = compare_composition(cfg, args.action, review=args.review, sequence=sequence)
+                    valid = result["valid"]
                 else:
                     revision = args.revision or project.revision
                     assets = args.asset_revision or project.changes()["asset_revision"]

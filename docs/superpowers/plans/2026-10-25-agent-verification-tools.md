@@ -36,9 +36,9 @@
 
 **Files:** `tools/sprite_pipeline/composition_check.py`, `tools/sprite_pipeline/projects_cli.py`, `tests/test_composition_check.py`, `workspaces/README.md`.
 
-- [ ] Write failing tests for matching and mismatching action/Review sequences and explicit sequence input.
-- [ ] Implement a read-only JSON check with the first mismatching slot and boundary context.
-- [ ] Run focused tests, document usage, and commit.
+- [x] Write failing tests for matching and mismatching action/Review sequences and explicit sequence input.
+- [x] Implement a read-only JSON check with the first mismatching slot and boundary context.
+- [x] Run focused tests, document usage, and commit.
 
 ### Task 3: Independent resource export check
 
