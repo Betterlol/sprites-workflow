@@ -14,7 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .workbench import ConflictError
 from .locking import ProjectBusyError
-from .projects import DEFAULT_WORKSPACES, ProjectStore
+from .projects import DEFAULT_WORKSPACES, EXTERNAL_ID, ProjectStore
 
 
 def create_app(config_path: Path | None = None, workspace_root: Path | None = None) -> FastAPI:
@@ -75,7 +75,14 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
                             anchor=payload.get("anchor"))
 
     def snapshot(project_id: str):
-        return {**store.get(project_id).state(), "project": store.describe(project_id), "token": token}
+        project = store.get(project_id)
+        state = project.state()
+        data = state["data"]
+        description = {"id": project_id, "name": data.get("project", {}).get("name") or data["character"],
+                       "character": data["character"], "frame_size": data["frame_size"],
+                       "directory": str(project.path.parent), "config": str(project.path),
+                       "external": project_id == EXTERNAL_ID}
+        return {**state, "project": description, "token": token}
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str):

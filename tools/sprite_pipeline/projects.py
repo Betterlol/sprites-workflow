@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from .config import NAME, PROJECT_PATHS, config_from_data, inside, load_config
 from .files import write_json
 from .locking import project_lock
-from .workbench import Project
+from .workbench import ConflictError, Project
 
 
 DEFAULT_WORKSPACES = Path(__file__).resolve().parents[2] / "workspaces"
@@ -33,6 +33,7 @@ class ProjectStore:
     def __init__(self, root: Path = DEFAULT_WORKSPACES, config_path: Path | None = None):
         self.root = root.resolve()
         self.cache: dict[Path, Project] = {}
+        self._validated: dict[Path, tuple[int, int]] = {}
         self.lock = threading.RLock()
         self.initial_id = None
         self.external = None
@@ -61,6 +62,12 @@ class ProjectStore:
 
     def get(self, project_id: str) -> Project:
         path = self.config_path(project_id)
+        with self.lock:
+            cached = self.cache.get(path)
+            if cached is not None and self._validated.get(path) == cached.config_signature():
+                return cached
+        before = path.stat()
+        signature = (before.st_mtime_ns, before.st_size)
         cfg = load_config(path)
         if project_id != EXTERNAL_ID:
             if not cfg.source.is_relative_to(path.parent) or cfg.source == path.parent:
@@ -68,15 +75,13 @@ class ProjectStore:
         with self.lock:
             if path not in self.cache:
                 self.cache[path] = Project(path, project_id=project_id)
+            if self.cache[path].config_signature() != signature:
+                raise ConflictError("工程配置正在变化，请稍后重试。")
+            self._validated[path] = signature
             return self.cache[path]
 
     def image_project(self, project_id: str) -> Project:
         """Reuse validated image roots while the config file is unchanged."""
-        path = self.config_path(project_id)
-        with self.lock:
-            project = self.cache.get(path)
-        if project is not None and project.config_signature() == project._image_config_signature:
-            return project
         return self.get(project_id)
 
     def describe(self, project_id: str) -> dict:

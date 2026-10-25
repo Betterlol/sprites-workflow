@@ -181,6 +181,24 @@ class ProjectWorkflowTests(unittest.TestCase):
         os.utime(image_path, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns + 1000000))
         self.assertEqual(self.snapshot()["assets"][0]["bbox"], [4, 5, 12, 14])
 
+    def test_unchanged_project_requests_reuse_validation_but_external_edits_refresh(self):
+        first = self.create()
+        with patch("sprite_pipeline.projects.load_config", side_effect=AssertionError("config was revalidated")):
+            repeat = self.snapshot()
+            changes = self.client.get("/api/projects/fish/changes")
+        self.assertEqual(repeat["revision"], first["revision"])
+        self.assertEqual(changes.status_code, 200)
+        self.assertEqual(repeat["project"]["name"], "大肥鱼")
+
+        config_path = self.root / "fish/pipeline.json"
+        updated = json.loads(config_path.read_text(encoding="utf-8"))
+        updated["project"]["name"] = "新名称"
+        write_json(config_path, updated)
+        self.assertEqual(self.snapshot()["project"]["name"], "新名称")
+        updated["paths"]["source"] = "../outside"
+        write_json(config_path, updated)
+        self.assertEqual(self.client.get("/api/projects/fish").status_code, 400)
+
     def test_names_creation_failures_and_isolation(self):
         original = self.create()
         for project_id in ("FISH", "../escape", "CON", "aux.png", "name.", "bad/name", "@config"):

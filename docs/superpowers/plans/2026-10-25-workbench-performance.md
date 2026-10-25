@@ -60,7 +60,18 @@
 - [ ] Implement response and client changes.
 - [ ] Run focused tests, the full three-suite gate, inspect diff, then commit `perf: reduce preview and background loading`.
 
-### Task 4: Real-project read-only benchmark
+### Task 4: Reuse validated configuration on unchanged requests
+
+**Files:** `tools/sprite_pipeline/projects.py`, `tools/sprite_pipeline/server.py`, `tests/test_projects.py`
+
+**Interfaces:** `ProjectStore.get(project_id) -> Project` reuses validation while the configuration file signature is unchanged and revalidates when it changes. The snapshot route builds its project description from the same state response rather than loading the config again.
+
+- [ ] Add a failing test for repeated snapshot and change requests, external project name edits and invalid path edits.
+- [ ] Run the focused test and observe the expected failure.
+- [ ] Implement validation reuse and one-pass snapshot description.
+- [ ] Run focused tests, the full three-suite gate, inspect diff, then commit `perf: reuse validated project configuration`.
+
+### Task 5: Real-project read-only benchmark
 
 **Files:** No production files; record numbers in the final report.
 
