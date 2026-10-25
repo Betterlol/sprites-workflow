@@ -1041,7 +1041,10 @@ function openExport() {
 function updateExportFormat() {
   const format = $('#export-format').value;
   $('#export-actions').hidden = ['project','review'].includes(format);
-  $('#export-note').textContent = format === 'review' ? '导出当前 Review，使用片段范围、重复次数及所选播放模式。' : format === 'project' ? '包含原图、processed、参考资料、说明和工程配置。解压到工作区即可重新打开。' : '图集使用游戏帧顺序；WebP 使用独立的展示播放配置。';
+  $('#export-note').textContent = format === 'review' ? '导出当前 Review 的 WebP、GIF 和逐步记录，使用所选片段范围与播放模式。' :
+    format === 'project' ? '包含原图、processed、参考资料、说明和工程配置。解压到工作区即可重新打开。' :
+    format === 'gif' ? 'GIF 使用展示播放顺序；每帧最多 256 色，透明度为二值，时长按 10 ms 取整。' :
+    '图集使用游戏帧顺序；WebP 与 GIF 使用独立的展示播放配置。';
 }
 $('#export-open').onclick = openExport; $('#export-close').onclick = () => $('#export-dialog').close(); $('#export-format').onchange = updateExportFormat;
 let exportJobId = null;

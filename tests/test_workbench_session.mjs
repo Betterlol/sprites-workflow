@@ -40,6 +40,7 @@ class Element {
       });
       return this.mergeChoices;
     }
+    if (selector === 'input:checked') return [...this.innerHTML.matchAll(/<input[^>]*value="([^"]+)"[^>]*checked/g)].map(([,value]) => new Element(value));
     return [];
   }
   setAttribute(name,value) { this.attributes.set(name,String(value)); }
@@ -419,4 +420,12 @@ assert.equal(elements.get('activity-state').hidden,false);
 assert.match(elements.get('activity-state').textContent,/1\/1.*hold.png/);
 releaseHeldUpload(); await heldImport;
 assert.equal(elements.get('activity-state').hidden,true);
+elements.get('export-open').onclick();
+elements.get('export-format').value = 'gif';
+elements.get('export-format').onchange();
+assert.match(elements.get('export-note').textContent,/256 色/,'GIF choice should explain its color limit');
+await elements.get('export-form').onsubmit({preventDefault() {}});
+assert(requests.some(request => request.url.endsWith('/jobs/export') &&
+  JSON.parse(request.options.body).options?.format === 'gif'),
+  'GIF choice should start the same tracked export flow');
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');
