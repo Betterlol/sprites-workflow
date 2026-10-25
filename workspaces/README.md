@@ -42,9 +42,15 @@ python tools/projects.py delete dafeiyu --kind reference --ref references/style.
 python tools/projects.py export dafeiyu --format project --output path/to/backup.zip
 python tools/projects.py export dafeiyu --format all --action idle --output path/to/idle.zip
 python tools/projects.py export dafeiyu --format all --exclude-action eat_rice_legacy --output path/to/game-actions.zip
+python tools/projects.py qa dafeiyu --action idle --output path/to/idle-qa
+python tools/projects.py qa dafeiyu --action idle --mode display --output path/to/idle-display-qa
+python tools/projects.py qa dafeiyu --review idle_to_attack --output path/to/review-qa
+python tools/projects.py qa dafeiyu --ref idle/000.png --ref attack/000.png --output path/to/join-qa
 ```
 
 动作资源导出的 `--action` 和 `--exclude-action` 都可重复指定；不传 `--action` 时从全部动作开始，再应用排除项。未知动作名、排除后没有剩余动作、在 `--format project` 完整工程备份中使用排除参数，都会报错且不生成 ZIP。筛选只影响本次产物，不修改工程配置。
+
+`qa` 从已保存配置和 `processed_sprites/` 读取素材，按动作的游戏/展示播放、已保存的 Review 或重复给出的 `--ref` 顺序，生成 `preview.webp`、`preview.gif`、每页最多 36 个播放槽位的 `contact-*.png` 和 `report.json`。原始素材引用使用工程默认 FPS。报告记录逐槽位引用、起始时间、时长、配置及素材摘要；动画编码可能合并相同画面，GIF 时长还会按 10 ms 取整，因此逐槽位时间以报告为准。输出必须是不存在的新目录，不能位于 source、processed 或 references 内；命令不修改工程素材和配置。结果供实际观看和复查，不能自动判定运动是否自然。
 
 需要修改配置时，先读取 `status` 的 `data` 和 `revision`，把修改后的配置写入独立草稿 JSON，再提交：
 
