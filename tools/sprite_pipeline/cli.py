@@ -24,6 +24,8 @@ def main(default_config: Path | None = None, argv: list[str] | None = None) -> i
     parser.add_argument("--config", type=Path, default=default_config, required=default_config is None)
     parser.add_argument("--source", action="append", dest="sources", help="Only this original image, e.g. idle.png; extract/process only; repeatable")
     parser.add_argument("--action", action="append", dest="actions", help="Only this assembled action; select/pack/preview/build only; repeatable")
+    parser.add_argument("--exclude-action", action="append", dest="exclude_actions",
+                        help="Exclude this action after --action selection; select/pack/preview/build only; repeatable")
     parser.add_argument("--output-root", type=Path, help="Write all stages into another directory; source paths remain config-relative")
     parser.add_argument("--no-preview", action="store_true", help="Do not render WebP during pack/build")
     args = parser.parse_args(argv)
@@ -39,16 +41,12 @@ def execute(args) -> int:
     try:
         if args.no_preview and args.stage not in {"pack", "build"}:
             raise ValueError("--no-preview is only supported for pack/build")
-        if args.actions and args.stage in {"extract", "process"}:
-            raise ValueError("extract/process work on original images; use --source instead of --action")
+        if (args.actions or args.exclude_actions) and args.stage in {"extract", "process"}:
+            raise ValueError("extract/process work on original images; use --source instead of --action/--exclude-action")
         if args.sources and args.stage not in {"extract", "process"}:
             raise ValueError("--source is only supported for extract/process; build prepares all original images")
         cfg = load_config(args.config, args.output_root)
-        actions = args.actions or list(cfg.data["actions"])
-        unknown = set(actions) - set(cfg.data["actions"])
-        if unknown:
-            raise ValueError(f"Unknown actions: {', '.join(sorted(unknown))}")
-        actions = list(dict.fromkeys(actions))
+        actions = cfg.select_actions(args.actions, args.exclude_actions)
         if args.stage not in {"extract", "process"} and not actions:
             raise ValueError("Configure actions after reviewing processed sprites; extract/process can run with actions={}")
         sources = []

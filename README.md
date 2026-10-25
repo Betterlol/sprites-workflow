@@ -111,6 +111,14 @@ python tools/build_dafeiyu_sprites.py build
 python tools/build_sprites.py extract --config workspaces/my_character/pipeline.json
 ```
 
+导出时可排除旧动作，例如导出除旧版进食外的全部动作：
+
+```powershell
+python tools/projects.py export dafeiyu --format all --exclude-action eat_rice_legacy --output "E:\SpriteExports\dafeiyu.zip"
+```
+
+`--exclude-action` 可重复使用，也可与 `--action` 合用：先选动作，再排除。分阶段 CLI 的 `select`、`pack`、`preview`、`build` 同样支持此参数。未知动作名或排除后没有剩余动作会报错；完整工程备份（`--format project`）不支持排除动作。
+
 ## Git 提交约定
 
 `source_sprites/`、工程锁、临时文件和工作区工程的 `exports/` 通过 [.gitignore](.gitignore) 忽略。`pipeline.json`、`source/`、`references/`、工程说明和 `processed_sprites/` 默认保留，应一起提交或备份。

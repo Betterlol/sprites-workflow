@@ -36,7 +36,10 @@ python tools/projects.py delete dafeiyu --kind source --ref unused.png
 python tools/projects.py delete dafeiyu --kind reference --ref references/style.png
 python tools/projects.py export dafeiyu --format project --output path/to/backup.zip
 python tools/projects.py export dafeiyu --format all --action idle --output path/to/idle.zip
+python tools/projects.py export dafeiyu --format all --exclude-action eat_rice_legacy --output path/to/game-actions.zip
 ```
+
+动作资源导出的 `--action` 和 `--exclude-action` 都可重复指定；不传 `--action` 时从全部动作开始，再应用排除项。未知动作名、排除后没有剩余动作、在 `--format project` 完整工程备份中使用排除参数，都会报错且不生成 ZIP。筛选只影响本次产物，不修改工程配置。
 
 需要修改配置时，先读取 `status` 的 `data` 和 `revision`，把修改后的配置写入独立草稿 JSON，再提交：
 
@@ -60,6 +63,8 @@ python tools/build_sprites.py pack --config workspaces/dafeiyu/pipeline.json
 ```
 
 其中 `extract/process` 不回写配置；`process` 会覆盖所选原图对应的 processed。`build` 明确重建全部阶段。要使用网页相同的引用保护与身份持久化行为，优先使用 `projects.py apply/prepare`。
+
+分阶段 CLI 的 `select/pack/preview/build` 也支持可重复的 `--exclude-action`。筛选不会清理之前已导出的动作文件；`build` 仍会准备全部原图，只筛选组装和打包的动作。
 
 ## 人与 Agent 协作
 

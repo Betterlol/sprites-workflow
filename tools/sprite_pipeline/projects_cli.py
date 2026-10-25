@@ -45,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         if name == "export":
             command.add_argument("--format", choices=("project", "frames", "atlas", "webp", "all"), default="project")
             command.add_argument("--action", action="append", dest="actions")
+            command.add_argument("--exclude-action", action="append", dest="exclude_actions",
+                                 help="Exclude an action after --action selection; repeatable; resource exports only")
             command.add_argument("--output", type=Path, required=True, help="New ZIP file; existing files are never overwritten")
     args = parser.parse_args(argv)
     try:
@@ -70,7 +72,13 @@ def main(argv: list[str] | None = None) -> int:
                         valid = not result["warnings"]
                         result["valid"] = valid
                 elif args.command == "export":
-                    options = {"format": args.format, "actions": args.actions or list(cfg.data["actions"])}
+                    if args.format == "project":
+                        if args.exclude_actions:
+                            raise ValueError("--exclude-action is not supported for project backups; choose frames, atlas, webp or all")
+                        actions = args.actions or list(cfg.data["actions"])
+                    else:
+                        actions = cfg.select_actions(args.actions, args.exclude_actions)
+                    options = {"format": args.format, "actions": actions}
                     content, _, _ = project.export(cfg.data, options)
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     with args.output.open("xb") as output:

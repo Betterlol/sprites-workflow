@@ -81,6 +81,18 @@ class Config:
         defaults = {key: value for key, value in self.data.get("defaults", {}).items() if key not in {"extract", "process"}}
         return merge(defaults, self.data["actions"][name])
 
+    def select_actions(self, included: list[str] | None = None, excluded: list[str] | None = None) -> list[str]:
+        """Resolve CLI action filters without changing the project or authored order."""
+        selected = list(dict.fromkeys(self.data["actions"] if included is None else included))
+        exclusions = set(excluded or [])
+        unknown = (set(selected) | exclusions) - set(self.data["actions"])
+        if unknown:
+            raise ValueError(f"Unknown actions: {', '.join(sorted(unknown))}")
+        selected = [name for name in selected if name not in exclusions]
+        if not selected and exclusions:
+            raise ValueError("No actions remain after --action/--exclude-action filtering")
+        return selected
+
     def source_spec(self, filename: str) -> dict:
         defaults = {key: self.data.get("defaults", {}).get(key, {}) for key in ("extract", "process")}
         return merge(defaults, self.data.get("sources", {}).get(filename, {}))
