@@ -36,6 +36,10 @@ class ConflictError(ValueError):
     """The on-disk project changed since the editor loaded it."""
 
 
+class ExportCancelled(Exception):
+    """An export was stopped at a safe item boundary."""
+
+
 def png_bytes(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -548,8 +552,22 @@ class Project:
                         raise
             return {**self.state(), "deleted": len(references)}
 
-    def export(self, data: dict, options: dict) -> tuple[bytes, str, str]:
+    def export(self, data: dict, options: dict, *, progress=None, cancelled=None,
+               expected_asset_revision: str | None = None,
+               expected_revision: str | None = None) -> tuple[bytes, str, str]:
         with self.lock:
+            if expected_revision is not None:
+                self.check_revision(expected_revision)
+            if expected_asset_revision is not None:
+                self.check_assets(expected_asset_revision)
+            def check_cancel() -> None:
+                if cancelled is not None and cancelled.is_set():
+                    raise ExportCancelled("Export cancelled")
+            def report(completed: int, total: int, phase: str) -> None:
+                check_cancel()
+                if progress is not None:
+                    progress(completed, total, phase)
+                check_cancel()
             cfg = self.draft(data)
             validate_editor(cfg)
             kind = options.get("format", "all")
@@ -560,24 +578,33 @@ class Project:
                 if kind == "project":
                     project_data = copy.deepcopy(cfg.data)
                     project_data["paths"] = dict(PROJECT_PATHS)
-                    archive.writestr("pipeline.json", json.dumps(project_data, ensure_ascii=False, indent=2))
+                    files = []
                     for filename in cfg.discover_sources(allow_empty=True, allow_missing=True):
-                        archive.write(inside(cfg.source, filename), "source/" + filename)
+                        files.append((inside(cfg.source, filename), "source/" + filename))
                     root = cfg.directory("processed_sprites")
                     for path in root.rglob("*"):
                         if path.is_file() and (path.suffix.lower() == ".png" or path.name == "_stage.json"):
                             reference = path.relative_to(root).as_posix()
-                            archive.write(inside(root, reference), "processed_sprites/" + reference)
+                            files.append((inside(root, reference), "processed_sprites/" + reference))
                     for name in REFERENCE_DIRS:
                         reference_root = self.reference_root(name)
                         for path in reference_root.rglob("*"):
                             if path.is_file():
                                 relative = path.relative_to(reference_root).as_posix()
-                                archive.write(inside(reference_root, relative), name + "/" + relative)
+                                files.append((inside(reference_root, relative), name + "/" + relative))
                     readme = cfg.path.parent / "README.md"
                     if readme.is_file():
-                        archive.write(inside(cfg.path.parent, "README.md"), "README.md")
+                        files.append((inside(cfg.path.parent, "README.md"), "README.md"))
+                    total = len(files) + 1
+                    report(0, total, "准备工程文件")
+                    archive.writestr("pipeline.json", json.dumps(project_data, ensure_ascii=False, indent=2))
+                    report(1, total, "pipeline.json")
+                    for index, (path, relative) in enumerate(files, 2):
+                        check_cancel()
+                        archive.write(path, relative)
+                        report(index, total, relative)
                 elif kind == "review":
+                    report(0, 1, "正在编码 Review")
                     review = options.get("review")
                     steps = review_steps(cfg, review)
                     image_cache = {ref: read_image(inside(cfg.directory("processed_sprites"), ref)) for ref in {step["ref"] for step in steps}}
@@ -590,12 +617,15 @@ class Project:
                                    lossless=True, method=4)
                     archive.writestr("review.webp", buffer.getvalue())
                     archive.writestr("review.animation.json", json.dumps({"review": review, "steps": steps}, ensure_ascii=False, indent=2))
+                    report(1, 1, "Review")
                 else:
                     names = options.get("actions")
                     if not isinstance(names, list) or not names or len(names) != len(set(names)):
                         raise ValueError("Select one or more distinct actions to export")
                     if any(name not in cfg.data["actions"] for name in names):
                         raise ValueError("Unknown export action")
+                    total = len(names) + 1
+                    report(0, total, "准备动作")
                     # The legacy exporters work in a disposable directory only.
                     with TemporaryDirectory(prefix="sprite-export-") as temporary:
                         export_data = copy.deepcopy(cfg.data)
@@ -603,7 +633,8 @@ class Project:
                             "source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")}
                         export_cfg = Config(cfg.path, Path(temporary), export_data)
                         summaries = []
-                        for name in names:
+                        for action_index, name in enumerate(names, 1):
+                            check_cancel()
                             steps = action_steps(cfg, name)
                             columns = min(cfg.action(name).get("pack", {}).get("columns", 4), len(steps))
                             if columns * cfg.size[0] > 16384 or ((len(steps) + columns - 1) // columns) * cfg.size[1] > 16384:
@@ -611,6 +642,7 @@ class Project:
                             folder = export_cfg.directory("sprites") / name
                             folder.mkdir(parents=True)
                             for index, step in enumerate(steps):
+                                check_cancel()
                                 source = inside(cfg.directory("processed_sprites"), step["ref"])
                                 if read_image(source).size != cfg.size:
                                     raise ValueError(f"{step['ref']}: sprite size does not match project canvas")
@@ -619,12 +651,15 @@ class Project:
                                 summaries.append(pack_action(export_cfg, name))
                             if kind in {"webp", "all"}:
                                 preview_action(export_cfg, name)
+                            report(action_index, total, name)
                         if summaries:
                             update_manifest(export_cfg, summaries)
                         for path in Path(temporary).rglob("*"):
                             if path.is_file():
+                                check_cancel()
                                 relative = path.relative_to(temporary)
                                 if relative.parts[0] != "sprites" or kind in {"frames", "all"}:
                                     archive.write(path, relative.as_posix())
                         archive.writestr("pipeline.json", json.dumps(cfg.data, ensure_ascii=False, indent=2))
+                        report(total, total, "ZIP")
             return output.getvalue(), f"{cfg.character}-{kind}.zip", "application/zip"

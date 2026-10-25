@@ -91,10 +91,13 @@ const context = {
   fetch:async (url, options = {}) => {
     requests.push({url,options});
     let result;
+    if (url.endsWith('/jobs/job-1/download')) return {ok:true,blob:async () => new Blob(['zip']),headers:{get:() => 'attachment; filename="test.zip"'}};
     if (url === '/api/projects') {
       if (options.method === 'POST') { const body = JSON.parse(options.body); const id = body.id || body.name; projects.set(id,snapshot(id)); result = {id}; }
       else result = {token:'session',workspace_root:'/workspaces',projects:[...projects.keys()].map(id => ({id,name:id,character:id,frame_size:[32,32]}))};
-    } else {
+    } else if (url.endsWith('/jobs/export')) result = {id:'job-1',status:'queued',completed:0,total:1,phase:'等待开始'};
+    else if (url.endsWith('/jobs/job-1')) result = {id:'job-1',status:'done',completed:1,total:1,phase:'已完成'};
+    else {
       const [,id,operation] = url.match(/^\/api\/projects\/([^/]+)(?:\/(\w+))?$/) || [];
       const project = projects.get(decodeURIComponent(id)); assert(project,`Unknown request ${url}`);
       if (operation === 'save') { const payload = JSON.parse(options.body); if (payload.revision !== project.revision) return {ok:false,status:409,json:async () => ({error:'external change'})}; project.data = structuredClone(payload.data); project.revision += '-saved'; result = {revision:project.revision}; }
@@ -279,4 +282,10 @@ assert(choice,'Same-field changes must be shown for explicit selection');
 choice.value = 'disk'; elements.get('merge-apply').onclick();
 assert.equal(state.data.project.name,'Disk title');
 assert.equal(state.revision,'newer-disk');
+elements.get('export-open').onclick();
+elements.get('export-format').value = 'project';
+await elements.get('export-form').onsubmit({preventDefault() {}});
+assert(requests.some(request => request.url.endsWith('/jobs/export')),'Export must start a progress job');
+assert(requests.some(request => request.url.endsWith('/jobs/job-1/download')),'Completed job must download its ZIP');
+assert(!elements.get('export-dialog').open);
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');

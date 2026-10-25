@@ -15,15 +15,18 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .workbench import ConflictError
 from .locking import ProjectBusyError
+from .jobs import ExportJobs
 from .projects import DEFAULT_WORKSPACES, EXTERNAL_ID, ProjectStore
 
 
 def create_app(config_path: Path | None = None, workspace_root: Path | None = None) -> FastAPI:
     store = ProjectStore(workspace_root or DEFAULT_WORKSPACES, config_path)
+    jobs = ExportJobs()
     token = secrets.token_urlsafe(32)
     web_root = Path(__file__).resolve().parent / "web"
     app = FastAPI(title="Sprite Workbench", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.projects = store
+    app.state.export_jobs = jobs
     app.state.project = store.get(store.initial_id) if store.initial_id is not None else None
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"])
 
@@ -111,6 +114,25 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
             cache_control = "private, max-age=31536000, immutable" if v == current_version else "no-store"
             media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             return Response(content, media_type=media_type, headers={"Cache-Control": cache_control})
+
+    @app.post("/api/projects/{project_id}/jobs/export")
+    def start_export_job(project_id: str, payload: dict = Body(...)):
+        return jobs.start(project_id, store.get(project_id), payload["data"], payload.get("options", {}),
+                          payload.get("revision"), payload.get("asset_revision"))
+
+    @app.get("/api/projects/{project_id}/jobs/{job_id}")
+    def get_export_job(project_id: str, job_id: str):
+        return jobs.status(project_id, job_id)
+
+    @app.post("/api/projects/{project_id}/jobs/{job_id}/cancel")
+    def cancel_export_job(project_id: str, job_id: str):
+        return jobs.cancel(project_id, job_id)
+
+    @app.get("/api/projects/{project_id}/jobs/{job_id}/download")
+    def download_export_job(project_id: str, job_id: str):
+        content, filename, media_type = jobs.download(project_id, job_id)
+        return Response(content, media_type=media_type,
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     def operate(project_id: str, operation: str, payload: dict):
         project = store.get(project_id)

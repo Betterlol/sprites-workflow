@@ -10,6 +10,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -26,7 +28,7 @@ from sprite_pipeline.extract import extract_source
 from sprite_pipeline.locking import project_lock
 from sprite_pipeline.projects import ProjectStore
 from sprite_pipeline.projects_cli import main as manage
-from sprite_pipeline.workbench import Project, png_bytes
+from sprite_pipeline.workbench import ExportCancelled, Project, png_bytes
 
 try:
     from fastapi.testclient import TestClient
@@ -310,6 +312,65 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(manage(["--workspace-root", str(self.root), "restore", "fish", version,
                                      "--revision", deleted["revision"], "--asset-revision", deleted["asset_revision"]]), 0)
         self.assertTrue((self.root / "fish/processed_sprites/imports/manual.png").exists())
+
+    def test_export_job_reports_progress_and_downloads_complete_zip(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed", filename="pose.png").json()
+        snapshot["data"]["actions"]["idle"] = {"sprites": ["imports/pose.png"], "fps": 8}
+        response = self.client.post("/api/projects/fish/jobs/export", headers=self.headers,
+                                    json={"data": snapshot["data"], "revision": snapshot["revision"],
+                                          "asset_revision": snapshot["asset_revision"],
+                                          "options": {"format": "frames", "actions": ["idle"]}})
+        self.assertEqual(response.status_code, 200, response.text)
+        job_id = response.json()["id"]
+        for _ in range(100):
+            status = self.client.get(f"/api/projects/fish/jobs/{job_id}").json()
+            if status["status"] in {"done", "failed", "cancelled"}:
+                break
+            time.sleep(.02)
+        self.assertEqual(status["status"], "done", status)
+        self.assertEqual(status["completed"], status["total"])
+        download = self.client.get(f"/api/projects/fish/jobs/{job_id}/download")
+        self.assertEqual(download.status_code, 200, download.text[:200])
+        with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+            self.assertIn("sprites/idle/idle_00.png", archive.namelist())
+        self.assertFalse((self.root / "fish/exports").exists())
+        self.assertEqual(self.client.get(f"/api/projects/other/jobs/{job_id}").status_code, 404)
+
+    def test_export_job_cancel_is_project_scoped_and_has_no_download(self):
+        self.create("fish")
+        self.create("other")
+        entered, release = threading.Event(), threading.Event()
+
+        def delayed_export(project, data, options, *, progress, cancelled, **kwargs):
+            progress(0, 2, "准备动作")
+            entered.set()
+            release.wait(3)
+            if cancelled.is_set():
+                raise ExportCancelled()
+            return b"unexpected", "unexpected.zip", "application/zip"
+
+        snapshot = self.snapshot("fish")
+        with patch.object(Project, "export", delayed_export):
+            response = self.client.post("/api/projects/fish/jobs/export", headers=self.headers,
+                                        json={"data": snapshot["data"], "revision": snapshot["revision"],
+                                              "asset_revision": snapshot["asset_revision"],
+                                              "options": {"format": "project"}})
+            self.assertEqual(response.status_code, 200, response.text)
+            job_id = response.json()["id"]
+            self.assertTrue(entered.wait(2))
+            self.assertEqual(self.client.get(f"/api/projects/other/jobs/{job_id}").status_code, 404)
+            self.assertEqual(self.client.post(f"/api/projects/other/jobs/{job_id}/cancel", headers=self.headers, json={}).status_code, 404)
+            self.assertEqual(self.client.get(f"/api/projects/fish/jobs/{job_id}/download").status_code, 409)
+            self.assertEqual(self.client.post(f"/api/projects/fish/jobs/{job_id}/cancel", headers=self.headers, json={}).status_code, 200)
+            release.set()
+            for _ in range(100):
+                status = self.client.get(f"/api/projects/fish/jobs/{job_id}").json()
+                if status["status"] == "cancelled":
+                    break
+                time.sleep(.02)
+            self.assertEqual(status["status"], "cancelled")
+            self.assertEqual(self.client.get(f"/api/projects/fish/jobs/{job_id}/download").status_code, 409)
 
     def test_history_storage_link_cannot_write_outside_project(self):
         snapshot = self.create()

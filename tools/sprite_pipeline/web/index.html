@@ -110,6 +110,7 @@
       <label class="field">导出格式<select id="export-format"><option value="all">完整动作资源 · 帧 + 图集 + WebP</option><option value="frames">PNG 帧序列 ZIP</option><option value="atlas">PNG 图集 + TexturePacker JSON</option><option value="webp">展示动画 WebP</option><option value="review">当前 Review · WebP + 播放记录</option><option value="project">完整工程 · 原图 + processed + 配置</option></select></label>
       <fieldset id="export-actions"><legend>选择动作</legend><div id="export-action-list"></div></fieldset>
       <p id="export-note" class="hint">图集使用游戏帧顺序；WebP 使用独立的展示播放配置。</p>
+      <div id="export-progress-box" class="export-progress" hidden><p id="export-progress" role="status">准备导出…</p><progress id="export-progress-bar" value="0" max="1"></progress><button id="export-cancel" type="button">取消生成</button></div>
       <button type="submit" class="primary wide" id="export-submit">生成并下载 ZIP ↗</button>
     </form>
   </dialog>

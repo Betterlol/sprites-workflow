@@ -8,6 +8,7 @@ import io
 import json
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -147,6 +148,24 @@ class WorkbenchTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             self.assertEqual(len(json.loads(archive.read("review.animation.json"))["steps"]), 5)
             self.assertIn("review.webp", archive.namelist())
+
+    def test_export_reports_completed_actions_and_cancels_before_next_action(self):
+        self.apply()
+        cancelled = threading.Event()
+        progress = []
+
+        def report(completed, total, phase):
+            progress.append((completed,total,phase))
+            if completed == 1:
+                cancelled.set()
+
+        from sprite_pipeline import workbench
+        self.assertTrue(hasattr(workbench,"ExportCancelled"))
+        with self.assertRaises(workbench.ExportCancelled):
+            Project(self.path).export(self.data,{"format": "frames", "actions": ["walk", "rest"]},
+                                      progress=report, cancelled=cancelled)
+        self.assertIn((1,3,"walk"),progress)
+        self.assertFalse((self.root / "exports").exists())
 
     def test_invalid_review_ranges_and_deleted_actions_cannot_be_saved(self):
         before = self.path.read_bytes()

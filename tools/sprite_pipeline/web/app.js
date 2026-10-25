@@ -910,19 +910,49 @@ function updateExportFormat() {
   $('#export-note').textContent = format === 'review' ? '导出当前 Review，使用片段范围、重复次数及所选播放模式。' : format === 'project' ? '包含原图、processed、参考资料、说明和工程配置。解压到工作区即可重新打开。' : '图集使用游戏帧顺序；WebP 使用独立的展示播放配置。';
 }
 $('#export-open').onclick = openExport; $('#export-close').onclick = () => $('#export-dialog').close(); $('#export-format').onchange = updateExportFormat;
+let exportJobId = null;
+$('#export-dialog').addEventListener('cancel', event => { if (exportJobId) event.preventDefault(); });
+$('#export-cancel').onclick = async () => {
+  if (!exportJobId) return;
+  $('#export-cancel').disabled = true;
+  $('#export-progress').textContent = '正在取消，当前步骤结束后停止…';
+  try { await api(`jobs/${exportJobId}/cancel`,{}); }
+  catch (error) { $('#export-cancel').disabled = false; toast(error.message,true); }
+};
 $('#export-form').onsubmit = async event => {
-  event.preventDefault(); const format = $('#export-format').value;
+  event.preventDefault(); if (exportJobId) return;
+  const format = $('#export-format').value;
   const actions = [...$('#export-action-list').querySelectorAll('input:checked')].map(input => input.value);
   if (!['project','review'].includes(format) && !actions.length) { toast('请至少选择一个动作',true); return; }
   if (format === 'review' && !currentReview()?.clips.length) { toast('请先创建 Review 并添加动作片段',true); return; }
   const submit = $('#export-submit'); submit.disabled = true; submit.textContent = '正在生成…';
+  $('#export-close').disabled = true; $('#export-format').disabled = true;
+  $('#export-progress-box').hidden = false; $('#export-cancel').disabled = false;
+  $('#export-progress').textContent = '正在准备导出…';
   try {
-    const response = await api('export',payload({options:{format,actions,review:currentReview()}}),true);
+    const job = await api('jobs/export',payload({options:{format,actions,review:currentReview()}}));
+    exportJobId = job.id;
+    let status;
+    do {
+      status = await api(`jobs/${job.id}`);
+      $('#export-progress').textContent = `${status.phase} · ${status.completed}/${status.total || '?'} 项`;
+      $('#export-progress-bar').max = Math.max(1,status.total);
+      $('#export-progress-bar').value = status.completed;
+      if (['done','failed','cancelled'].includes(status.status)) break;
+      await new Promise(resolve => setTimeout(resolve,400));
+    } while (true);
+    if (status.status === 'cancelled') { toast('导出已取消'); return; }
+    if (status.status === 'failed') throw new Error(status.error || '导出失败');
+    const response = await api(`jobs/${job.id}/download`,undefined,true);
     const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
     link.href = url; link.download = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1] || 'sprites.zip';
     link.click(); setTimeout(() => URL.revokeObjectURL(url),60000); $('#export-dialog').close(); toast('导出完成');
   } catch (error) { toast(error.message,true); }
-  finally { submit.disabled = false; submit.textContent = '生成并下载 ZIP ↗'; }
+  finally {
+    exportJobId = null; submit.disabled = false; submit.textContent = '生成并下载 ZIP ↗';
+    $('#export-close').disabled = false; $('#export-format').disabled = false;
+    $('#export-progress-box').hidden = true; $('#export-progress-bar').value = 0;
+  }
 };
 
 document.addEventListener('keydown', event => {
