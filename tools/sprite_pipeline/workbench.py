@@ -126,6 +126,7 @@ class Project:
         self.lock = project_lock(self.path)
         self._image_config = load_config(self.path)
         self._image_config_signature = self.config_signature()
+        self._asset_metadata: dict[Path, tuple[tuple[int, int], list[int], tuple[int, int, int, int] | None]] = {}
 
     def config_signature(self) -> tuple[int, int]:
         stat = self.path.stat()
@@ -201,12 +202,22 @@ class Project:
             cfg = config_from_data(json.loads(raw), self.path)
             assets = []
             root = cfg.directory("processed_sprites")
+            present_assets = set()
             for path in sorted(root.rglob("*.png")):
                 reference = path.relative_to(root).as_posix()
                 inside(root, reference)
-                with Image.open(path) as image:
-                    assets.append({"ref": reference, "url": image_url("processed", reference, path, self.project_id),
-                                   "size": list(image.size), "bbox": image.convert("RGBA").getbbox()})
+                present_assets.add(path)
+                stat = path.stat()
+                signature = (stat.st_mtime_ns, stat.st_size)
+                cached = self._asset_metadata.get(path)
+                if cached is None or cached[0] != signature:
+                    with Image.open(path) as image:
+                        cached = (signature, list(image.size), image.convert("RGBA").getbbox())
+                    self._asset_metadata[path] = cached
+                assets.append({"ref": reference, "url": image_url("processed", reference, path, self.project_id),
+                               "size": cached[1], "bbox": cached[2]})
+            self._asset_metadata = {path: metadata for path, metadata in self._asset_metadata.items()
+                                    if path in present_assets}
             sources = []
             discovered = cfg.discover_sources(allow_empty=True, allow_missing=True)
             for filename in discovered:

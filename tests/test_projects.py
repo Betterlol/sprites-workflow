@@ -159,6 +159,28 @@ class ProjectWorkflowTests(unittest.TestCase):
         write_json(config_path, data)
         self.assertEqual(self.client.get(url).status_code, 400)
 
+    def test_snapshot_reuses_unchanged_processed_metadata_and_refreshes_changed_bbox(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="processed").json()
+        self.assertEqual(snapshot["assets"][0]["bbox"], [0, 0, 32, 32])
+        image_path = self.root / "fish/processed_sprites/imports/pose.png"
+        image_open = Image.open
+
+        def reject_redecode(path, *args, **kwargs):
+            if Path(path) == image_path:
+                raise AssertionError("unchanged processed image was decoded again")
+            return image_open(path, *args, **kwargs)
+
+        with patch("sprite_pipeline.workbench.Image.open", side_effect=reject_redecode):
+            self.assertEqual(self.snapshot()["assets"][0]["bbox"], [0, 0, 32, 32])
+
+        old_stat = image_path.stat()
+        changed = Image.new("RGBA", (32, 32))
+        changed.paste("blue", (4, 5, 12, 14))
+        changed.save(image_path)
+        os.utime(image_path, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns + 1000000))
+        self.assertEqual(self.snapshot()["assets"][0]["bbox"], [4, 5, 12, 14])
+
     def test_names_creation_failures_and_isolation(self):
         original = self.create()
         for project_id in ("FISH", "../escape", "CON", "aux.png", "name.", "bad/name", "@config"):
