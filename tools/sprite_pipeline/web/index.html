@@ -49,6 +49,12 @@
     <span id="material-state" data-state="quiet">素材：载入中</span>
   </div>
 
+  <nav id="pane-switch" class="pane-switch" aria-label="工作区域">
+    <button id="pane-materials" type="button" data-pane="materials" aria-pressed="false">素材</button>
+    <button id="pane-canvas" type="button" data-pane="canvas" aria-pressed="true">画布与时间轴</button>
+    <button id="pane-properties" type="button" data-pane="properties" aria-pressed="false">属性</button>
+  </nav>
+
   <main id="workspace" class="workspace">
     <aside id="materials-pane" class="sidebar">
       <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><div class="item-actions"><button id="delete-item" class="text-button danger" hidden>删除</button><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div></div>
@@ -62,7 +68,7 @@
     </aside>
 
     <div id="left-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整素材区宽度" aria-orientation="vertical" aria-controls="materials-pane"></div>
-    <section id="canvas-pane" class="editor">
+    <section id="canvas-pane" class="editor" tabindex="-1">
       <div class="canvas-toolbar"><div><span class="eyebrow" id="editor-kind">ACTION EDITOR</span><strong id="editor-title">—</strong></div><div class="view-controls"><label><input id="guides" type="checkbox" checked> 辅助线</label><label><input id="onion" type="checkbox"> 前帧叠图</label><label><input id="reference" type="checkbox"> Idle 参考</label><select id="background" aria-label="画布背景"><option value="checker">棋盘格</option><option value="dark">深色</option><option value="light">浅色</option></select><select id="zoom" aria-label="画布缩放"><option value="fit">适应画布</option><option value="1">100%</option><option value="0.5">50%</option><option value="2">200%</option></select></div></div>
       <div id="canvas-area" class="canvas-area">
         <span class="canvas-label" id="canvas-label">统一画布 · 固定锚点</span>

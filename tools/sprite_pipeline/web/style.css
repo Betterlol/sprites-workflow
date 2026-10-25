@@ -55,3 +55,53 @@ input[type=checkbox],input[type=range]{min-height:0}
 body.resizing{user-select:none;cursor:col-resize}
 .editor .timeline{height:var(--timeline-height,140px);min-height:110px;max-height:320px}
 @media(max-width:1100px){.workspace{grid-template-columns:minmax(180px,28%) minmax(0,1fr);overflow:auto}.workspace>.splitter-vertical{display:none}.inspector{grid-column:1/-1;min-height:260px}}
+
+.pane-switch{display:none}
+body.project-home .workflow-status,body.project-home .pane-switch{display:none}
+@media(max-width:1100px){
+  body{height:100dvh;min-height:0;overflow:hidden}
+  .topbar{height:auto;min-height:68px;flex-wrap:wrap;gap:10px;padding:10px 14px}
+  .top-actions{margin-left:auto;flex-wrap:wrap;gap:6px}
+  .modebar{min-height:48px;overflow:hidden;padding:0 10px}
+  .modebar .save-status{display:none}
+  .workflow-status{gap:6px;padding:6px 10px;overflow-x:auto;white-space:nowrap}
+  .workflow-status span{flex-shrink:0;font-size:11px}
+  body:not(.project-home) .pane-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:5px 10px;border-bottom:1px solid var(--border);background:var(--panel)}
+  .pane-switch button{min-width:0;min-height:40px;padding:6px 8px;border-color:transparent;background:transparent;font-size:12px}
+  .pane-switch button.active{border-color:#65824e;background:var(--accent-dim);color:var(--accent)}
+  body:not(.project-home) .workspace{display:block;flex:1;min-width:0;min-height:0;overflow:hidden}
+  .workspace>.sidebar,.workspace>.editor,.workspace>.inspector,.workspace>.splitter-vertical{display:none}
+  body[data-pane=materials] #materials-pane,body[data-pane=canvas] #canvas-pane,body[data-pane=properties] #properties-pane{display:flex}
+  #materials-pane,#canvas-pane,#properties-pane{width:100%;height:100%;min-width:0;min-height:0;border:0}
+  body[data-pane=materials] #materials-pane{display:block;overflow-y:auto}
+  #materials-pane .item-list{max-height:180px}
+  #materials-pane .asset-library{height:auto;min-height:180px;overflow:visible;grid-template-columns:repeat(4,minmax(0,1fr))}
+  #materials-pane .sidebar-footer{position:sticky;bottom:0;z-index:2;background:var(--panel)}
+  #canvas-pane{overflow-y:auto}
+  #canvas-pane .canvas-area{min-height:180px}
+  #properties-pane{overflow-y:auto}
+  #inspector-content{display:block;overflow:auto;min-height:0}
+}
+@media(max-width:540px){
+  .top-actions{width:100%;justify-content:flex-start}
+  .top-actions button{font-size:11px;min-height:34px}
+  .mode-tabs button{min-width:106px}
+  body:not(.project-home) .workspace{min-width:0}
+  #materials-pane,#canvas-pane,#properties-pane{height:100%}
+  #materials-pane .asset-library{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .sidebar{height:100%}.editor{height:100%}.inspector{height:100%}
+  .canvas-toolbar{min-height:100px;height:auto}
+  .statusbar>span:last-child{display:none}
+}
+@media(max-width:1100px) and (max-height:600px){
+  .topbar{min-height:0;flex-wrap:nowrap;gap:7px;padding:5px 8px}
+  .brand{flex-shrink:0}.brand-sub{display:none}
+  .project-label{margin-left:0;min-width:0}.project-label #project-name{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .top-actions{width:auto;min-width:0;margin-left:auto;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto}
+  .top-actions button{min-height:30px;padding:4px 8px}
+  .modebar{height:40px;min-height:40px}.mode-tabs button{min-width:92px}
+  .workflow-status{padding:3px 8px}.workflow-status span{min-height:25px;padding:3px 8px}
+  .pane-switch{padding:3px 8px}.pane-switch button{min-height:34px}
+  .statusbar{display:none}
+  #canvas-pane .canvas-area{min-height:120px}
+}

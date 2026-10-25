@@ -19,11 +19,14 @@ class Classes {
 }
 class Element {
   constructor(value = '') { this.value = value; this.defaultValue = value; this.classList = new Classes(); this.dataset = {}; this.hidden = false; this.textContent = ''; this.tagName = 'DIV'; this.checked = true; this.open = false; this.attributes = new Map(); this.styles = new Map(); this.style = {setProperty:(key,val) => this.styles.set(key,val),getPropertyValue:key => this.styles.get(key)}; }
-  set innerHTML(value) { this.html = value; this.mergeChoices = null; register(value); }
+  set innerHTML(value) { this.html = value; this.mergeChoices = null; this.itemButtons = null; register(value); }
   get innerHTML() { return this.html || ''; }
   querySelectorAll(selector) {
     if (selector === '[data-project]') return [...this.innerHTML.matchAll(/data-project="([^"]+)"/g)].map(([,id]) => {
       const button = new Element(); button.dataset.project = id; return this.projectButtons?.find(b => b.dataset.project === id) || button;
+    });
+    if (selector === '[data-item]') return this.itemButtons ||= [...this.innerHTML.matchAll(/data-item="([^"]+)"/g)].map(([,id]) => {
+      const button = new Element(); button.dataset.item = id; return button;
     });
     if (selector === '[data-version]') {
       this.historyButtons ||= [...this.innerHTML.matchAll(/data-version="([^"]+)"/g)].map(([,id]) => {
@@ -44,6 +47,7 @@ class Element {
   addEventListener() {}
   showModal() { this.open = true; }
   close() { this.open = false; }
+  focus() { document.activeElement = this; }
   reset() { for (const [id, element] of elements) if (id.startsWith('new-project-')) element.value = element.defaultValue; }
   click() { this.onclick?.(); }
 }
@@ -56,6 +60,7 @@ function register(markup) {
 register(html);
 const descendants = new Map();
 const tabs = ['source','action','review','reference'].map(mode => { const tab = new Element(); tab.dataset.mode = mode; return tab; });
+const paneButtons = ['materials','canvas','properties'].map(pane => { const button = elements.get('pane-' + pane); button.dataset.pane = pane; return button; });
 const body = new Element(); body.classList.add('project-home');
 const document = {
   body, hidden:false, activeElement:{tagName:'BODY'}, addEventListener() {}, createElement:() => new Element(),
@@ -63,7 +68,7 @@ const document = {
     if (selector.startsWith('#') && !selector.includes(' ')) return elements.get(selector.slice(1)) || null;
     if (!descendants.has(selector)) descendants.set(selector,new Element()); return descendants.get(selector);
   },
-  querySelectorAll:selector => selector === '[data-mode]' ? tabs : [],
+  querySelectorAll:selector => selector === '[data-mode]' ? tabs : selector === '[data-pane]' ? paneButtons : [],
 };
 class Player {
   constructor(canvas,area,onStep) { this.onStep = onStep; this.steps = []; this.index = 0; this.options = {}; this.images = new Map(); }
@@ -170,6 +175,12 @@ elements.get('left-splitter').onkeydown({key:'ArrowRight',preventDefault() {}});
 assert(Number(elements.get('left-splitter').getAttribute('aria-valuenow')) > leftBefore,
   'Keyboard adjustment should enlarge the materials pane');
 assert(stored.has('sprite-workbench-layout'),'Layout size should survive a reload');
+assert(elements.get('pane-materials'),'Narrow screens need a visible Materials work-area choice');
+elements.get('pane-materials').onclick();
+assert.equal(body.dataset.pane,'materials');
+assert.equal(elements.get('pane-materials').getAttribute('aria-pressed'),'true');
+elements.get('pane-canvas').onclick();
+assert.equal(body.dataset.pane,'canvas');
 
 state.data.notes = ['human draft'];
 projects.get('alpha').asset_revision = 'new-pixels';
@@ -269,6 +280,12 @@ const {previewSource} = context.hooks;
 state.sources = ['sheet.png','slow.png','fast.png'].map(file => ({file,url:'/sources/' + file,size:[16,16]}));
 for (const source of state.sources) state.data.sources[source.file] = {};
 state.source = 'sheet.png'; mode('source');
+context.window.innerWidth = 375;
+elements.get('pane-materials').onclick();
+elements.get('item-list').querySelectorAll('[data-item]')[0].onclick();
+assert.equal(body.dataset.pane,'canvas','Choosing source material should reveal its canvas on narrow screens');
+assert.equal(document.activeElement,elements.get('canvas-pane'),'Keyboard focus should follow the opened work area');
+context.window.innerWidth = 1440;
 await previewSource(); await previewSource();
 assert.equal(previewRequests.filter(source => source === 'sheet.png').length,1,'Unchanged preview should be reused');
 state.data.sources['sheet.png'].process = {offset:[1,0]};

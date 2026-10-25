@@ -73,6 +73,20 @@ bindSplitter('left-splitter','left','x',1);
 bindSplitter('right-splitter','right','x',-1);
 bindSplitter('timeline-splitter','timeline','y',-1);
 window.addEventListener('resize',() => applyLayout());
+function showPane(value, focus = false) {
+  document.body.dataset.pane = value;
+  for (const button of document.querySelectorAll('[data-pane]')) {
+    const active = button.dataset.pane === value;
+    button.setAttribute('aria-pressed',active);
+    button.classList.toggle('active',active);
+  }
+  if (value === 'canvas') {
+    player.resize();
+    if (focus && window.innerWidth <= 1100) $('#canvas-pane').focus();
+  }
+}
+document.querySelectorAll('[data-pane]').forEach(button => { button.onclick = () => showPane(button.dataset.pane); });
+showPane('canvas');
 function toast(message, error = false) {
   const box = $('#toast'); box.textContent = message; box.classList.toggle('error', error); box.hidden = false;
   $('#status-message').textContent = message;
@@ -97,10 +111,10 @@ const payload = extra => ({data:state.data, revision:state.revision, asset_revis
 async function task(message, operation) {
   if (state.busy) return;
   state.busy = true; $('#canvas-loading').hidden = false; $('#canvas-loading').textContent = message;
-  ['.workspace','.modebar','.top-actions'].forEach(selector => { $(selector).inert = true; });
+  ['.workspace','.modebar','.top-actions','.pane-switch'].forEach(selector => { $(selector).inert = true; });
   try { return await operation(); }
   catch (error) { toast(error.message, true); }
-  finally { state.busy = false; $('#canvas-loading').hidden = true; ['.workspace','.modebar','.top-actions'].forEach(selector => { $(selector).inert = false; }); updateSaveStatus(); }
+  finally { state.busy = false; $('#canvas-loading').hidden = true; ['.workspace','.modebar','.top-actions','.pane-switch'].forEach(selector => { $(selector).inert = false; }); updateSaveStatus(); }
 }
 function reviews() { return state.data?.workbench?.reviews || {}; }
 function currentReview() { return reviews()[state.review]; }
@@ -205,7 +219,7 @@ async function openProject(projectId) {
     state.sourceView = 'processed'; state.playbackMode = 'runtime';
     $('#asset-search').value = ''; $('#asset-source').value = '';
     $('#source-upload').value = ''; $('#processed-upload').value = ''; $('#reference-upload').value = '';
-    document.body.classList.remove('project-home'); setSnapshot(snapshot); suggestReviews();
+    document.body.classList.remove('project-home'); setSnapshot(snapshot); suggestReviews(); showPane('canvas');
     history.replaceState(null,'','?project=' + encodeURIComponent(projectId));
     applyLayout(); player.resize();
     if (!snapshot.assets.length && !snapshot.sources.length) toast('工程已创建，可以导入第一张原图或单帧素材。');
@@ -383,7 +397,7 @@ function renderItems() {
     button.onclick = () => {
       state[state.mode] = button.dataset.item; state.selected = 0; state.clip = 0; player.pause();
       if (state.mode === 'source') { state.preview = null; state.previewError = null; state.previewEpoch++; schedulePreview(); }
-      renderAll();
+      renderAll(); showPane('canvas',true);
     };
     if (state.mode === 'action') {
       button.draggable = true; button.ondragstart = event => event.dataTransfer.setData('application/x-action', button.dataset.item);
@@ -434,6 +448,7 @@ function addAssets(references, at) {
     const refs = [...frames(action)], slots = refs.map((_, i) => i), index = at ?? refs.length;
     refs.splice(index, 0, ...references); slots.splice(index, 0, ...references.map(() => null)); editFrames(action, slots, refs, state.data.defaults?.fps || 12); state.selected = index;
   });
+  showPane('canvas',true);
 }
 function activeSteps() {
   if (state.mode === 'reference') return [];
