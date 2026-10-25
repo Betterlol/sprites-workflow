@@ -1,4 +1,4 @@
-import {clone, frames, actionSteps, reviewSteps, editFrames, defaultReviews, reconcileReviewRanges, merge} from './model.js';
+import {clone, frames, actionSteps, reviewSteps, editFrames, defaultReviews, reconcileReviewRanges, merge, roundMs} from './model.js';
 import {Player} from './player.js';
 
 const $ = selector => document.querySelector(selector);
@@ -236,6 +236,7 @@ function mode(value) {
 }
 function renderAll() {
   if (!state.data) return;
+  $('#project-name').textContent = state.data.project?.name || state.data.character;
   const actionNames = Object.keys(state.data.actions);
   if (!state.data.actions[state.action]) state.action = actionNames[0];
   if (!reviews()[state.review]) state.review = Object.keys(reviews())[0];
@@ -751,6 +752,40 @@ $('#new-item').onclick = () => {
   }
 };
 $('#save').onclick = save;
+$('#settings-open').onclick = () => {
+  if (!state.data) return;
+  $('#settings-name').value = state.data.project?.name || state.data.character;
+  $('#settings-width').value = state.data.frame_size[0];
+  $('#settings-height').value = state.data.frame_size[1];
+  $('#settings-anchor-x').value = state.data.anchor.x;
+  $('#settings-anchor-y').value = state.data.anchor.y;
+  $('#settings-error').hidden = true;
+  const manual = state.assets.filter(asset => /^(imports|_approved)\//.test(asset.ref)).length;
+  $('#settings-impact').textContent = `改变画布或锚点后，${state.sources.length} 张原图的处理结果需要逐张重新应用。${manual ? `${manual} 张手工素材不会自动改动，画布尺寸变化时需重新制作或导入。` : ''}保存工程只保存参数，不会改写现有图片。`;
+  $('#settings-dialog').showModal();
+};
+$('#settings-close').onclick = () => $('#settings-dialog').close();
+$('#settings-form').onsubmit = event => {
+  event.preventDefault();
+  const name = $('#settings-name').value.trim();
+  const width = Number($('#settings-width').value), height = Number($('#settings-height').value);
+  const x = Number($('#settings-anchor-x').value), y = Number($('#settings-anchor-y').value);
+  if (!name || name.length > 120 || !Number.isInteger(width) || !Number.isInteger(height) ||
+      width < 1 || height < 1 || width > 4096 || height > 4096 ||
+      !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+    $('#settings-error').textContent = '请检查名称、1–4096 的画布尺寸和 0–1 的锚点。';
+    $('#settings-error').hidden = false; return;
+  }
+  const canvasChanged = width !== state.data.frame_size[0] || height !== state.data.frame_size[1];
+  if (canvasChanged && state.assets.length && !confirm('改变画布后，现有图片不会自动缩放。原图需重新应用，手工素材需按新画布重新制作或导入；继续加入草稿？')) return;
+  change(() => {
+    state.data.project ||= {}; state.data.project.name = name;
+    state.data.frame_size = [width,height];
+    state.data.anchor = {...state.data.anchor,x,y,pixels:[roundMs(width * x),roundMs(height * y)]};
+  },{preview:true});
+  $('#settings-dialog').close();
+  toast('工程设置已加入草稿；保存工程只保存参数，不会改写图片');
+};
 $('#history-open').onclick = async () => {
   const dialog = $('#history-dialog');
   $('#history-list').textContent = '正在读取版本记录…';

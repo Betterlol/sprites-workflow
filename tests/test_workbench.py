@@ -269,6 +269,23 @@ class WorkbenchTests(unittest.TestCase):
         snapshot = self.client.get("/api/project").json()
         self.assertTrue(snapshot["sources"][0]["stale"])
 
+    def test_saved_canvas_and_anchor_settings_keep_existing_pixels_until_reapplied(self):
+        snapshot = self.apply()
+        processed = self.root / "processed_sprites/walk/000.png"
+        original = processed.read_bytes()
+        updated = copy.deepcopy(snapshot["data"])
+        updated["project"] = {"name": "New display name"}
+        updated["frame_size"] = [24, 24]
+        updated["anchor"] = {"x": .25, "y": .75, "pixels": [6, 18]}
+        response = self.client.post("/api/save", json={"data": updated, "revision": snapshot["revision"]},
+                                    headers={"x-workbench-token": self.token})
+        self.assertEqual(response.status_code, 200, response.text)
+        current = self.client.get("/api/project").json()
+        self.assertEqual(current["data"]["frame_size"], [24, 24])
+        self.assertEqual(current["data"]["anchor"]["pixels"], [6, 18])
+        self.assertTrue(current["sources"][0]["stale"])
+        self.assertEqual(processed.read_bytes(), original)
+
 
 class SliceIdentityTests(unittest.TestCase):
     def test_new_region_does_not_steal_deleted_pose_id(self):

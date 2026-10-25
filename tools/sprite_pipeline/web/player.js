@@ -102,7 +102,8 @@ export class Player {
     const image = this.image(step.url || this.assets?.get(step.ref)?.url);
     if (!image?.complete || !image.naturalWidth) return;
     this.context.globalAlpha = opacity;
-    this.context.drawImage(image, 0, 0, ...this.size);
+    // Keep stored pixels at their actual size while canvas settings are a draft.
+    this.context.drawImage(image, 0, 0);
     this.context.globalAlpha = 1;
   }
   draw() {

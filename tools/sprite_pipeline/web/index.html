@@ -16,6 +16,7 @@
     <div class="top-actions">
       <button id="undo" class="icon-button" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
       <button id="redo" class="icon-button" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button>
+      <button id="settings-open" class="subtle">工程设置</button>
       <button id="history-open" class="subtle">版本记录</button>
       <button id="reload" class="subtle">重新载入</button>
       <button id="save">保存工程 <kbd>Ctrl S</kbd></button>
@@ -81,6 +82,15 @@
       <div class="field-row"><label class="field">锚点 X（0–1）<input id="new-project-anchor-x" type="number" min="0" max="1" step="any" value="0.5" required></label><label class="field">锚点 Y（0–1）<input id="new-project-anchor-y" type="number" min="0" max="1" step="any" value="0.9" required></label></div>
       <p id="project-create-error" class="error-panel" hidden role="alert"></p>
       <button id="project-create" type="submit" class="primary wide">创建并打开</button>
+    </form>
+  </dialog>
+  <dialog id="settings-dialog">
+    <form id="settings-form"><div class="dialog-heading"><div><span class="eyebrow">PROJECT</span><h2>工程设置</h2></div><button type="button" id="settings-close" class="icon-button" aria-label="关闭工程设置">×</button></div>
+      <label class="field">工程名称<input id="settings-name" required maxlength="120"></label>
+      <div class="field-row"><label class="field">画布宽度<input id="settings-width" type="number" min="1" max="4096" required></label><label class="field">画布高度<input id="settings-height" type="number" min="1" max="4096" required></label></div>
+      <div class="field-row"><label class="field">锚点 X（0–1）<input id="settings-anchor-x" type="number" min="0" max="1" step="any" required></label><label class="field">锚点 Y（0–1）<input id="settings-anchor-y" type="number" min="0" max="1" step="any" required></label></div>
+      <p id="settings-impact" class="hint"></p><p id="settings-error" class="error-panel" hidden role="alert"></p>
+      <button type="submit" class="primary wide">加入工程草稿</button>
     </form>
   </dialog>
   <dialog id="history-dialog">
