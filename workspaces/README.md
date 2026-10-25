@@ -49,6 +49,7 @@ python tools/projects.py qa dafeiyu --ref idle/000.png --ref attack/000.png --ou
 python tools/projects.py qa dafeiyu --sequence path/to/playback.json --output path/to/custom-qa
 python tools/projects.py check-composition dafeiyu --action sing --review sing_parts
 python tools/projects.py check-composition dafeiyu --action sing --sequence path/to/playback.json
+python tools/projects.py check-export dafeiyu --archive path/to/game-actions.zip --format all --action sing
 ```
 
 动作资源导出的 `--action` 和 `--exclude-action` 都可重复指定；不传 `--action` 时从全部动作开始，再应用排除项。未知动作名、排除后没有剩余动作、在 `--format project` 完整工程备份中使用排除参数，都会报错且不生成 ZIP。筛选只影响本次产物，不修改工程配置。
@@ -58,6 +59,8 @@ python tools/projects.py check-composition dafeiyu --action sing --sequence path
 需要自定义逐帧时长时，`--sequence` 接收 JSON，例如 `{"loop":1,"steps":[{"ref":"idle/000.png","duration_ms":150},{"ref":"attack/000.png","duration_ms":80}]}`。`loop` 与 WebP 相同：0 为无限循环，1 为播放一次；最多 10000 步。它不创建动作或 Review，也不改变正式编排，适合临时检查特殊接缝。
 
 `check-composition` 把完整动作的**游戏播放**槽位与一个已保存的 runtime Review 或序列 JSON 逐项比较引用和毫秒时长，返回首个差异、两侧槽位总数/时长及各片段边界；匹配时 `valid=true`、退出码 0，不匹配时 `valid=false`、退出码 1。边界重复引用只报告，不擅自去重或判定画面好坏。命令只读，需要当前已保存配置和现有 processed 帧。
+
+`check-export` 只读检查 `projects.py export` 的资源 ZIP：CRC、导出 PNG 与当前 processed 字节、图集像素/时长/元数据、WebP/GIF 播放记录及实际可解码的画面和时长。`--format` 可要求包含指定格式或 `all`；重复 `--action` 可要求指定动作必须存在，同时仍会检查 ZIP 内其他动作。省略时按 ZIP 中已有动作和格式检查，无法识别整个格式组或动作被完全遗漏。返回 `valid`、`issues` 和格式限制说明，不自动修改或修复交付包。完整工程备份不属于此检查；旧 ZIP 若与当前配置或 processed 素材不同，会报告失败。GIF 的期望颜色按项目的 256 色规则量化后比较；合并相同帧时报告会说明可核对的范围。
 
 需要修改配置时，先读取 `status` 的 `data` 和 `revision`，把修改后的配置写入独立草稿 JSON，再提交：
 

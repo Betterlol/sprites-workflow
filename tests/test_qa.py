@@ -285,3 +285,14 @@ class QaTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     render_qa(self.cfg, sequence=sequence, output=output)
                 self.assertFalse(output.exists())
+
+    def test_gif_overflow_from_merged_long_hold_is_a_clear_error(self):
+        from sprite_pipeline.qa import render_qa
+        sequence = {"steps": [
+            {"ref": "walk/000.png", "duration_ms": 655_350},
+            {"ref": "walk/000.png", "duration_ms": 655_350},
+        ]}
+        output = self.root / "merged-overflow"
+        with self.assertRaisesRegex(ValueError, "GIF"):
+            render_qa(self.cfg, sequence=sequence, output=output)
+        self.assertFalse(output.exists())

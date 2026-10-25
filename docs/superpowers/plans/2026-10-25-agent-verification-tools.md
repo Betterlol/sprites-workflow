@@ -44,6 +44,6 @@
 
 **Files:** `tools/sprite_pipeline/export_check.py`, `tools/sprite_pipeline/projects_cli.py`, `tests/test_export_check.py`, `workspaces/README.md`.
 
-- [ ] Write failing tests for a valid resource archive and corrupted frame, atlas and preview entries.
-- [ ] Implement independent ZIP and pixel/timing validation against current processed PNGs.
-- [ ] Run focused and required full suites, review final diff, and commit.
+- [x] Write failing tests for a valid resource archive and corrupted frame, atlas and preview entries.
+- [x] Implement independent ZIP and pixel/timing validation against current processed PNGs.
+- [x] Run focused and required full suites, review final diff, and commit.

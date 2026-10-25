@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .config import load_config
 from .composition_check import compare_composition
+from .export_check import check_export
 from .projects import DEFAULT_WORKSPACES, ProjectStore
 from .qa import render_qa
 from .workbench import ConflictError, validate_editor
@@ -75,6 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     expected = composition.add_mutually_exclusive_group(required=True)
     expected.add_argument("--review", help="Saved runtime Review of the component parts")
     expected.add_argument("--sequence", type=Path, help="Explicit JSON playback sequence")
+    verify_export = commands.add_parser("check-export", help="Verify a resource ZIP against current processed sprites")
+    verify_export.add_argument("project")
+    verify_export.add_argument("--archive", type=Path, required=True, help="Resource ZIP to inspect without extracting")
+    verify_export.add_argument("--format", choices=("frames", "atlas", "webp", "gif", "all"),
+                               help="Require this resource format; defaults to auto-detection")
+    verify_export.add_argument("--action", action="append", dest="actions",
+                               help="Require this action in the ZIP; repeat to check a filtered export")
     args = parser.parse_args(argv)
     try:
         store = ProjectStore(args.workspace_root)
@@ -125,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
                 elif args.command == "check-composition":
                     sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
                     result = compare_composition(cfg, args.action, review=args.review, sequence=sequence)
+                    valid = result["valid"]
+                elif args.command == "check-export":
+                    result = check_export(cfg, args.archive, expect_format=args.format,
+                                          expected_actions=args.actions)
                     valid = result["valid"]
                 else:
                     revision = args.revision or project.revision
