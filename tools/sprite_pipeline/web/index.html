@@ -30,7 +30,7 @@
     <div id="project-list" class="project-grid" aria-live="polite"><p class="muted">正在读取工程列表…</p></div>
   </section>
 
-  <div id="external-change" class="external-change" hidden role="status"><span id="external-message"></span><button id="external-refresh">刷新</button><button id="draft-download">下载配置草稿</button></div>
+  <div id="external-change" class="external-change" hidden role="status"><span id="external-message"></span><button id="external-merge" hidden>合并配置</button><button id="external-refresh">刷新</button><button id="draft-download">下载配置草稿</button></div>
 
   <nav class="modebar" aria-label="工作模式">
     <div class="mode-tabs" role="tablist">
@@ -83,6 +83,12 @@
       <p id="project-create-error" class="error-panel" hidden role="alert"></p>
       <button id="project-create" type="submit" class="primary wide">创建并打开</button>
     </form>
+  </dialog>
+  <dialog id="merge-dialog">
+    <div class="dialog-heading"><div><span class="eyebrow">MERGE</span><h2>合并配置修改</h2></div><button type="button" id="merge-close" class="icon-button" aria-label="关闭合并配置">×</button></div>
+    <p class="muted">不同字段的修改会自动合并。对于双方都修改过的字段，请选择要保留的值；结果仍需手动保存。</p>
+    <p id="merge-summary" class="hint"></p><div id="merge-conflicts" class="merge-conflicts"></div>
+    <button id="merge-apply" class="primary wide">应用到当前草稿</button>
   </dialog>
   <dialog id="settings-dialog">
     <form id="settings-form"><div class="dialog-heading"><div><span class="eyebrow">PROJECT</span><h2>工程设置</h2></div><button type="button" id="settings-close" class="icon-button" aria-label="关闭工程设置">×</button></div>

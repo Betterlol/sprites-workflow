@@ -7,6 +7,8 @@ import vm from 'node:vm';
 const html = await readFile(new URL('../tools/sprite_pipeline/web/index.html',import.meta.url),'utf8');
 const modelSource = await readFile(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url),'utf8');
 const model = await import('data:text/javascript;base64,' + Buffer.from(modelSource).toString('base64'));
+const mergeSource = await readFile(new URL('../tools/sprite_pipeline/web/merge.js',import.meta.url),'utf8');
+const mergeModel = await import('data:text/javascript;base64,' + Buffer.from(mergeSource).toString('base64'));
 const elements = new Map();
 class Classes {
   constructor(values = []) { this.values = new Set(values); }
@@ -17,7 +19,7 @@ class Classes {
 }
 class Element {
   constructor(value = '') { this.value = value; this.defaultValue = value; this.classList = new Classes(); this.dataset = {}; this.hidden = false; this.textContent = ''; this.tagName = 'DIV'; this.checked = true; this.open = false; }
-  set innerHTML(value) { this.html = value; register(value); }
+  set innerHTML(value) { this.html = value; this.mergeChoices = null; register(value); }
   get innerHTML() { return this.html || ''; }
   querySelectorAll(selector) {
     if (selector === '[data-project]') return [...this.innerHTML.matchAll(/data-project="([^"]+)"/g)].map(([,id]) => {
@@ -28,6 +30,12 @@ class Element {
         const button = new Element(); button.dataset.version = id; return button;
       });
       return this.historyButtons;
+    }
+    if (selector === '[data-merge-choice]') {
+      this.mergeChoices ||= [...this.innerHTML.matchAll(/data-merge-choice="([^"]+)"/g)].map(([,key]) => {
+        const select = new Element('local'); select.dataset.mergeChoice = key; return select;
+      });
+      return this.mergeChoices;
     }
     return [];
   }
@@ -75,7 +83,7 @@ let releaseSlowPreview = null;
 let allowDiscard = true;
 let pausedProject = null, resumeSnapshot = null;
 const context = {
-  ...model, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
+  ...model, ...mergeModel, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
   FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,cGl4ZWxz'; queueMicrotask(() => this.onload()); } },
   location:{pathname:'/',search:''}, history:{replaceState() {}},
   window:{addEventListener() {}}, setTimeout:() => 1, clearTimeout() {}, setInterval:(_,delay) => intervals.push(delay),
@@ -89,7 +97,7 @@ const context = {
     } else {
       const [,id,operation] = url.match(/^\/api\/projects\/([^/]+)(?:\/(\w+))?$/) || [];
       const project = projects.get(decodeURIComponent(id)); assert(project,`Unknown request ${url}`);
-      if (operation === 'save') { const payload = JSON.parse(options.body); project.data = structuredClone(payload.data); project.revision += '-saved'; result = {revision:project.revision}; }
+      if (operation === 'save') { const payload = JSON.parse(options.body); if (payload.revision !== project.revision) return {ok:false,status:409,json:async () => ({error:'external change'})}; project.data = structuredClone(payload.data); project.revision += '-saved'; result = {revision:project.revision}; }
       else if (operation === 'upload') {
         const payload = JSON.parse(options.body);
         assert.equal(payload.revision,project.revision,'Batch imports must use the latest config revision');
@@ -251,4 +259,24 @@ state.source = 'slow.png'; const slowPreview = previewSource(); await flush();
 state.source = 'fast.png'; await previewSource();
 releaseSlowPreview(); await slowPreview;
 assert.equal(state.previewSource,'fast.png','Late preview must not replace the selected source');
+await openProject('alpha');
+state.data.project.name = 'Local title';
+projects.get('alpha').data.notes = ['disk note']; projects.get('alpha').revision = 'disk-merge';
+await checkExternalChanges();
+assert(state.externalChange);
+await elements.get('external-merge').onclick();
+assert(elements.get('merge-dialog').open);
+await elements.get('merge-apply').onclick();
+assert.equal(state.data.project.name,'Local title');
+assert.deepEqual([...state.data.notes],['disk note']);
+assert.equal(state.revision,'disk-merge'); assert(dirty());
+projects.get('alpha').revision = 'disk-changed-again';
+await save(); assert(dirty(),'Another disk change must still block Save after merge');
+projects.get('alpha').data.project.name = 'Disk title'; projects.get('alpha').revision = 'newer-disk';
+await checkExternalChanges(); await elements.get('external-merge').onclick();
+const choice = elements.get('merge-conflicts').querySelectorAll('[data-merge-choice]').find(input => input.dataset.mergeChoice === 'project/name');
+assert(choice,'Same-field changes must be shown for explicit selection');
+choice.value = 'disk'; elements.get('merge-apply').onclick();
+assert.equal(state.data.project.name,'Disk title');
+assert.equal(state.revision,'newer-disk');
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');

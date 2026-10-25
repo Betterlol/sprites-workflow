@@ -1,4 +1,5 @@
 import {clone, frames, actionSteps, reviewSteps, editFrames, defaultReviews, reconcileReviewRanges, merge, roundMs} from './model.js';
+import {mergeDraft, resolveMerge, conflictKey} from './merge.js';
 import {Player} from './player.js';
 
 const $ = selector => document.querySelector(selector);
@@ -13,6 +14,7 @@ const state = {mode:'action', data:null, revision:null, token:null, assets:[], s
   history:[], future:[], saved:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false,
   assetSelection:new Set(), libraryMulti:false, lastAsset:null};
 let previewTimer, toastTimer, previewRequest;
+let mergeContext;
 const previewCache = new Map();
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
@@ -75,7 +77,7 @@ function setSnapshot(snapshot) {
   previewRequest?.controller.abort(); previewRequest = null;
   state.data = snapshot.data; state.revision = snapshot.revision; state.assets = snapshot.assets; state.sources = snapshot.sources;
   state.references = snapshot.references || []; reconcileMaterials();
-  state.assetRevision = snapshot.asset_revision; state.externalChange = false; $('#external-change').hidden = true;
+  state.assetRevision = snapshot.asset_revision; state.externalChange = false; $('#external-change').hidden = true; $('#external-merge').hidden = true;
   state.token = snapshot.token || state.token; state.saved = JSON.stringify(snapshot.data);
   state.legacyCount = snapshot.legacy_count; state.history = []; state.future = [];
   state.action = state.data.actions[state.action] ? state.action : Object.keys(state.data.actions)[0];
@@ -151,8 +153,9 @@ async function showProjects() {
   });
 }
 
-function showExternalChange(message) {
+function showExternalChange(message, configChanged = false) {
   state.externalChange = true; $('#external-change').hidden = false;
+  $('#external-merge').hidden = !configChanged;
   $('#external-message').textContent = message; updateSaveStatus();
 }
 
@@ -167,7 +170,7 @@ async function refreshExternal() {
       // Refresh pixels while keeping the user's recipe, history and selection.
       state.assets = snapshot.assets; state.sources = snapshot.sources; state.assetRevision = snapshot.asset_revision;
       state.references = snapshot.references || []; reconcileMaterials();
-      state.legacyCount = snapshot.legacy_count; state.externalChange = false; $('#external-change').hidden = true;
+      state.legacyCount = snapshot.legacy_count; state.externalChange = false; $('#external-change').hidden = true; $('#external-merge').hidden = true;
       state.preview = null; state.previewSource = null; state.previewEpoch++;
       player.pause(); renderAll();
       if (snapshot.warnings?.length) toast(snapshot.warnings.join('\n'),true);
@@ -178,7 +181,7 @@ async function refreshExternal() {
 
 let checkingDisk = false;
 async function checkExternalChanges() {
-  if (checkingDisk || state.busy || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#export-dialog').open) return;
+  if (checkingDisk || state.busy || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#export-dialog').open || $('#merge-dialog').open) return;
   checkingDisk = true;
   const projectId = state.projectId;
   try {
@@ -189,8 +192,8 @@ async function checkExternalChanges() {
       return;
     }
     if (dirty()) showExternalChange(changes.revision !== state.revision
-      ? '配置已被外部修改，当前草稿已保留。可下载草稿，或重新载入工程。'
-      : '素材已被外部修改。点击刷新可更新素材，并保留当前配置草稿。');
+      ? '配置已被外部修改，当前草稿已保留。可以合并双方修改。'
+      : '素材已被外部修改。点击刷新可更新素材，并保留当前配置草稿。',changes.revision !== state.revision);
     else {
       const snapshot = await api('project');
       // A user may have edited or switched projects while the request was in flight.
@@ -217,6 +220,43 @@ $('#project-form').onsubmit = async event => {
   finally { submit.disabled = false; }
 };
 $('#external-refresh').onclick = refreshExternal;
+$('#external-merge').onclick = async () => {
+  if (!state.projectId || !dirty() || state.busy) return;
+  const projectId = state.projectId, saved = state.saved, local = JSON.stringify(state.data);
+  try {
+    const snapshot = await api('project');
+    if (projectId !== state.projectId || saved !== state.saved || local !== JSON.stringify(state.data)) {
+      toast('读取磁盘配置期间草稿发生了变化，请重试合并',true); return;
+    }
+    if (snapshot.revision === state.revision) { await refreshExternal(); return; }
+    const proposal = mergeDraft(JSON.parse(saved),state.data,snapshot.data);
+    mergeContext = {projectId,saved,local,snapshot,proposal};
+    $('#merge-summary').textContent = proposal.conflicts.length
+      ? `有 ${proposal.conflicts.length} 处双方都修改过的字段；未选择时保留当前草稿值。`
+      : '双方修改了不同字段，可直接应用合并结果。';
+    $('#merge-conflicts').innerHTML = proposal.conflicts.map(conflict => {
+      const key = conflictKey(conflict.path), label = conflict.path.join(' / ') || '整个配置';
+      const localValue = conflict.localMissing ? '〈已删除〉' : JSON.stringify(conflict.local,null,2);
+      const diskValue = conflict.diskMissing ? '〈已删除〉' : JSON.stringify(conflict.disk,null,2);
+      return `<section class="merge-conflict"><h3>${escape(label)}</h3><div class="merge-values"><div><strong>当前草稿</strong><pre>${escape(localValue)}</pre></div><div><strong>磁盘版本</strong><pre>${escape(diskValue)}</pre></div></div><label>采用<select data-merge-choice="${escape(key)}"><option value="local">当前草稿</option><option value="disk">磁盘版本</option></select></label></section>`;
+    }).join('');
+    $('#merge-dialog').showModal();
+  } catch (error) { toast('无法合并配置：' + error.message,true); }
+};
+$('#merge-close').onclick = () => $('#merge-dialog').close();
+$('#merge-apply').onclick = () => {
+  const context = mergeContext;
+  if (!context || context.projectId !== state.projectId || context.saved !== state.saved ||
+      context.local !== JSON.stringify(state.data)) { toast('草稿已变化，请重新打开合并窗口',true); return; }
+  const choices = Object.fromEntries([...$('#merge-conflicts').querySelectorAll('[data-merge-choice]')]
+    .map(select => [select.dataset.mergeChoice,select.value]));
+  const merged = resolveMerge(context.proposal,choices);
+  player.pause(); setSnapshot(context.snapshot);
+  state.data = merged;
+  if (JSON.stringify(merged) !== state.saved) state.history = [clone(context.snapshot.data)];
+  mergeContext = null; $('#merge-dialog').close(); renderAll();
+  toast('修改已合并到草稿；请检查后保存工程');
+};
 $('#draft-download').onclick = () => {
   const url = URL.createObjectURL(new Blob([JSON.stringify(state.data,null,2) + '\n'],{type:'application/json'}));
   const link = document.createElement('a'); link.href = url; link.download = 'pipeline-draft.json'; link.click();
