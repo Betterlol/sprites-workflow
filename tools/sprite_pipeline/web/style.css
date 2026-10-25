@@ -43,6 +43,7 @@ input[type=checkbox],input[type=range]{min-height:0}
 .workflow-status [data-state=ready]{border-left-color:var(--accent);color:var(--text)}
 .workflow-status [data-state=pending]{border-left-color:var(--orange);color:#f1cd9a}
 .workflow-status [data-state=error]{border-left-color:var(--danger);color:#ffb9b9}
+.workflow-status [data-state=busy]{border-left-color:#8cb4df;color:#c7e0ff}
 @media(prefers-reduced-motion:reduce){button{transition:none}}
 
 .workspace{grid-template-columns:var(--materials-width,260px) 8px minmax(420px,1fr) 8px var(--properties-width,300px)}

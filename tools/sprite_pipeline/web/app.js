@@ -11,7 +11,7 @@ const number = (id, value, attributes = '') => `<input id="${id}" type="number" 
 const info = (key, value) => `<div class="info-row"><span>${key}</span><strong>${escape(value)}</strong></div>`;
 const section = (title, body) => `<section class="inspector-section"><h3>${title}</h3>${body}</section>`;
 const state = {mode:'action', data:null, revision:null, token:null, assets:[], sources:[], references:[], action:null, source:null, review:null, reference:null,
-  selected:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewError:null,
+  selected:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewKey:null, previewError:null,
   history:[], future:[], saved:null, savedData:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false,
   assetSelection:new Set(), libraryMulti:false, lastAsset:null};
 let previewTimer, toastTimer, previewRequest;
@@ -22,49 +22,54 @@ const player = new Player($('#stage'), $('#canvas-area'), onStep);
 const LAYOUT_KEY = 'sprite-workbench-layout';
 let storedLayout = {};
 try { storedLayout = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {}; } catch {}
-const layout = {left:savedSize(storedLayout.left,260),right:savedSize(storedLayout.right,300),
+const preferredLayout = {left:savedSize(storedLayout.left,260),right:savedSize(storedLayout.right,300),
   timeline:savedSize(storedLayout.timeline,140)};
-function applyLayout(persist = false) {
-  const width = $('#workspace').clientWidth || window.innerWidth || 1440;
+const renderedLayout = {...preferredLayout};
+function applyLayout() {
+  const width = window.innerWidth || $('#workspace').clientWidth || 1440;
   if (width > 1100) {
-    layout.left = clampPanel(layout.left,width,layout.right,'left');
-    layout.right = clampPanel(layout.right,width,layout.left,'right');
+    renderedLayout.left = clampPanel(preferredLayout.left,width,preferredLayout.right,'left');
+    renderedLayout.right = clampPanel(preferredLayout.right,width,renderedLayout.left,'right');
   }
-  layout.timeline = clampTimeline(layout.timeline,$('#canvas-pane').clientHeight || window.innerHeight || 800);
-  $('#workspace').style.setProperty('--materials-width',`${layout.left}px`);
-  $('#workspace').style.setProperty('--properties-width',`${layout.right}px`);
-  $('#canvas-pane').style.setProperty('--timeline-height',`${layout.timeline}px`);
+  const editorHeight = $('#canvas-pane').clientHeight;
+  if (editorHeight > 0) renderedLayout.timeline = clampTimeline(preferredLayout.timeline,editorHeight);
+  $('#workspace').style.setProperty('--materials-width',`${renderedLayout.left}px`);
+  $('#workspace').style.setProperty('--properties-width',`${renderedLayout.right}px`);
+  $('#canvas-pane').style.setProperty('--timeline-height',`${renderedLayout.timeline}px`);
   for (const [id,value,minimum,maximum] of [
-    ['left-splitter',layout.left,210,Math.max(layout.left,210,Math.min(420,width - 16 - 420 - layout.right))],
-    ['right-splitter',layout.right,250,Math.max(layout.right,250,Math.min(460,width - 16 - 420 - layout.left))],
-    ['timeline-splitter',layout.timeline,110,Math.max(110,Math.min(320,($('#canvas-pane').clientHeight || window.innerHeight || 800) - 260))],
+    ['left-splitter',renderedLayout.left,210,Math.max(renderedLayout.left,210,Math.min(420,width - 16 - 420 - renderedLayout.right))],
+    ['right-splitter',renderedLayout.right,250,Math.max(renderedLayout.right,250,Math.min(460,width - 16 - 420 - renderedLayout.left))],
+    ['timeline-splitter',renderedLayout.timeline,110,Math.max(renderedLayout.timeline,110,Math.min(320,(editorHeight || 800) - 260))],
   ]) {
     const handle = $(`#${id}`);
     handle.setAttribute('aria-valuemin',minimum);
     handle.setAttribute('aria-valuemax',maximum);
     handle.setAttribute('aria-valuenow',value);
   }
-  if (persist) { try { localStorage.setItem(LAYOUT_KEY,JSON.stringify(layout)); } catch {} }
 }
+function persistLayout() { try { localStorage.setItem(LAYOUT_KEY,JSON.stringify(preferredLayout)); } catch {} }
 function bindSplitter(id,key,axis,sign) {
   const handle = $(`#${id}`);
   handle.onkeydown = event => {
     const delta = axis === 'x' ? {ArrowLeft:-24,ArrowRight:24}[event.key] : {ArrowUp:-24,ArrowDown:24}[event.key];
     if (delta === undefined) return;
-    event.preventDefault(); layout[key] += delta * sign; applyLayout(true);
+    event.preventDefault(); event.stopPropagation();
+    preferredLayout[key] = renderedLayout[key] + delta * sign;
+    applyLayout(); preferredLayout[key] = renderedLayout[key]; persistLayout();
   };
   handle.onpointerdown = event => {
     if (event.button !== 0) return;
     event.preventDefault(); handle.setPointerCapture(event.pointerId);
     document.body.classList.add('resizing');
-    const start = axis === 'x' ? event.clientX : event.clientY, initial = layout[key];
+    const start = axis === 'x' ? event.clientX : event.clientY, initial = renderedLayout[key];
     handle.onpointermove = move => {
-      layout[key] = initial + ((axis === 'x' ? move.clientX : move.clientY) - start) * sign;
+      preferredLayout[key] = initial + ((axis === 'x' ? move.clientX : move.clientY) - start) * sign;
       applyLayout();
     };
     const finish = () => {
       handle.onpointermove = null; handle.onpointerup = null; handle.onpointercancel = null;
-      document.body.classList.remove('resizing'); applyLayout(true);
+      document.body.classList.remove('resizing');
+      preferredLayout[key] = renderedLayout[key]; persistLayout();
     };
     handle.onpointerup = finish; handle.onpointercancel = finish;
   };
@@ -73,6 +78,7 @@ bindSplitter('left-splitter','left','x',1);
 bindSplitter('right-splitter','right','x',-1);
 bindSplitter('timeline-splitter','timeline','y',-1);
 window.addEventListener('resize',() => applyLayout());
+new ResizeObserver(() => applyLayout()).observe($('#workspace'));
 function showPane(value, focus = false) {
   document.body.dataset.pane = value;
   for (const button of document.querySelectorAll('[data-pane]')) {
@@ -81,7 +87,7 @@ function showPane(value, focus = false) {
     button.classList.toggle('active',active);
   }
   if (value === 'canvas') {
-    player.resize();
+    applyLayout(); player.resize();
     if (focus && window.innerWidth <= 1100) $('#canvas-pane').focus();
   }
 }
@@ -111,10 +117,11 @@ const payload = extra => ({data:state.data, revision:state.revision, asset_revis
 async function task(message, operation) {
   if (state.busy) return;
   state.busy = true; $('#canvas-loading').hidden = false; $('#canvas-loading').textContent = message;
+  $('#activity-state').textContent = message; $('#activity-state').hidden = false;
   ['.workspace','.modebar','.top-actions','.pane-switch'].forEach(selector => { $(selector).inert = true; });
   try { return await operation(); }
   catch (error) { toast(error.message, true); }
-  finally { state.busy = false; $('#canvas-loading').hidden = true; ['.workspace','.modebar','.top-actions','.pane-switch'].forEach(selector => { $(selector).inert = false; }); updateSaveStatus(); }
+  finally { state.busy = false; $('#canvas-loading').hidden = true; $('#activity-state').hidden = true; ['.workspace','.modebar','.top-actions','.pane-switch'].forEach(selector => { $(selector).inert = false; }); updateSaveStatus(); }
 }
 function reviews() { return state.data?.workbench?.reviews || {}; }
 function currentReview() { return reviews()[state.review]; }
@@ -134,8 +141,9 @@ function updateSaveStatus() {
   $('#draft-state').dataset.state = state.externalChange || draft ? 'pending' : 'ready';
   const sourceChanged = state.mode === 'source' && state.source && state.savedData &&
     JSON.stringify(sourceRecipe(state.data,state.source)) !== JSON.stringify(sourceRecipe(state.savedData,state.source));
+  const currentPreview = state.preview && state.previewSource === state.source && state.previewKey === previewKey(state.source);
   const preview = state.mode !== 'source' || !state.source ? '未选择原图' : state.previewError ? '预览失败' :
-    sourceChanged ? (state.preview && state.previewSource === state.source ? '预览待应用' : '参数待预览') : '当前参数';
+    sourceChanged ? (currentPreview ? '预览待应用' : '参数待预览') : '当前参数';
   $('#preview-state').textContent = `处理预览：${preview}`;
   $('#preview-state').dataset.state = state.previewError ? 'error' : sourceChanged ? 'pending' : 'quiet';
   const stale = state.sources.filter(source => source.stale).length;
@@ -154,7 +162,7 @@ function checkpoint() {
 }
 function change(operation, {render = true, preview = false} = {}) {
   checkpoint(); operation(); reconcileReviewRanges(state.data); state.previewEpoch++;
-  if (state.mode === 'source' && preview) schedulePreview();
+  if (state.mode === 'source' && preview) { state.preview = null; state.previewKey = null; schedulePreview(); }
   if (render) renderAll(); else updateSaveStatus();
 }
 function setSnapshot(snapshot) {
@@ -166,7 +174,7 @@ function setSnapshot(snapshot) {
   state.legacyCount = snapshot.legacy_count; state.history = []; state.future = [];
   state.action = state.data.actions[state.action] ? state.action : Object.keys(state.data.actions)[0];
   state.review = reviews()[state.review] ? state.review : Object.keys(reviews())[0];
-  state.preview = null; state.previewSource = null; state.previewError = null; state.previewEpoch++;
+  state.preview = null; state.previewSource = null; state.previewKey = null; state.previewError = null; state.previewEpoch++;
   player.setProject(state.data, state.assets); renderAll();
   const name = snapshot.project?.name || state.data.project?.name || state.data.character;
   $('#project-name').textContent = name;
@@ -396,7 +404,7 @@ function renderItems() {
   $('#item-list').querySelectorAll('[data-item]').forEach(button => {
     button.onclick = () => {
       state[state.mode] = button.dataset.item; state.selected = 0; state.clip = 0; player.pause();
-      if (state.mode === 'source') { state.preview = null; state.previewError = null; state.previewEpoch++; schedulePreview(); }
+      if (state.mode === 'source') { state.preview = null; state.previewKey = null; state.previewError = null; state.previewEpoch++; schedulePreview(); }
       renderAll(); showPane('canvas',true);
     };
     if (state.mode === 'action') {
@@ -747,8 +755,8 @@ function previewKey(source) {
     state.data.frame_size, state.data.anchor, state.data.defaults?.extract, state.data.defaults?.process,
     state.data.sources?.[source]]);
 }
-function showPreview(result, source) {
-  state.preview = result; state.previewSource = source; state.previewError = null;
+function showPreview(result, source, key) {
+  state.preview = result; state.previewSource = source; state.previewKey = key; state.previewError = null;
   state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
   if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus(); }
   $('#status-message').textContent = `处理预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
@@ -757,7 +765,7 @@ async function previewSource(force = false) {
   if (!state.source) return;
   const epoch = ++state.previewEpoch, source = state.source, key = previewKey(source);
   if (force) previewCache.delete(key);
-  if (previewCache.has(key)) { showPreview(previewCache.get(key),source); return; }
+  if (previewCache.has(key)) { showPreview(previewCache.get(key),source,key); return; }
   $('#status-message').textContent = '正在预览切图和处理结果…';
   let request = previewRequest;
   if (!request || request.key !== key || force) {
@@ -771,7 +779,7 @@ async function previewSource(force = false) {
     previewCache.delete(key); previewCache.set(key,result);
     if (previewCache.size > 4) previewCache.delete(previewCache.keys().next().value);
     if (epoch !== state.previewEpoch || source !== state.source) return;
-    showPreview(result,source);
+    showPreview(result,source,key);
   } catch (error) {
     if (error.name === 'AbortError') return;
     if (epoch !== state.previewEpoch) return;
@@ -993,7 +1001,8 @@ async function uploadFile(input,kind) {
   await task('正在导入素材…',async () => {
     const imported = [], failures = []; let skipped = 0;
     for (const [index,file] of files.entries()) {
-      $('#canvas-loading').textContent = `正在导入 ${index + 1}/${files.length} · ${file.name}`;
+      const message = `正在导入 ${index + 1}/${files.length} · ${file.name}`;
+      $('#canvas-loading').textContent = message; $('#activity-state').textContent = message;
       try {
         if (file.size > 40 * 1024 * 1024) throw new Error('单张素材请控制在 40 MiB 以内');
         const content = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(',')[1]); reader.onerror = () => reject(reader.error || new Error('图片读取失败')); reader.readAsDataURL(file); });
@@ -1081,8 +1090,8 @@ $('#export-form').onsubmit = async event => {
 };
 
 document.addEventListener('keydown', event => {
-  if (!state.data || state.busy || $('#project-dialog').open) return;
-  const editable = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
+  if (!state.data || state.busy || event.defaultPrevented || $('#project-dialog').open) return;
+  const editable = ['INPUT','TEXTAREA','SELECT','BUTTON'].includes(document.activeElement?.tagName);
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!$('#export-dialog').open) save(); return; }
   if (editable || $('#export-dialog').open) return;
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); restoreHistory(event.shiftKey); }

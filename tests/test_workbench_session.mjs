@@ -59,11 +59,12 @@ function register(markup) {
 }
 register(html);
 const descendants = new Map();
+const documentListeners = new Map(), windowListeners = new Map();
 const tabs = ['source','action','review','reference'].map(mode => { const tab = new Element(); tab.dataset.mode = mode; return tab; });
 const paneButtons = ['materials','canvas','properties'].map(pane => { const button = elements.get('pane-' + pane); button.dataset.pane = pane; return button; });
 const body = new Element(); body.classList.add('project-home');
 const document = {
-  body, hidden:false, activeElement:{tagName:'BODY'}, addEventListener() {}, createElement:() => new Element(),
+  body, hidden:false, activeElement:{tagName:'BODY'}, addEventListener(type,handler) { (documentListeners.get(type) || documentListeners.set(type,[]).get(type)).push(handler); }, createElement:() => new Element(),
   querySelector(selector) {
     if (selector.startsWith('#') && !selector.includes(' ')) return elements.get(selector.slice(1)) || null;
     if (!descendants.has(selector)) descendants.set(selector,new Element()); return descendants.get(selector);
@@ -73,6 +74,7 @@ const document = {
 class Player {
   constructor(canvas,area,onStep) { this.onStep = onStep; this.steps = []; this.index = 0; this.options = {}; this.images = new Map(); }
   pause() { this.playing = false; }
+  toggle() { this.playing = !this.playing; return this.playing; }
   reset() { this.pause(); this.steps = []; this.index = 0; this.images.clear(); }
   resize() {}
   draw() {}
@@ -86,14 +88,17 @@ const requests = [];
 const intervals = [];
 const previewRequests = [];
 const stored = new Map();
+const observedResizes = new Map();
 let releaseSlowPreview = null;
+let releaseHeldUpload = null;
 let allowDiscard = true;
 let pausedProject = null, resumeSnapshot = null;
 const context = {
   ...model, ...mergeModel, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
+  ResizeObserver:class { constructor(callback) { this.callback = callback; } observe(element) { observedResizes.set(element,this.callback); } },
   FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,cGl4ZWxz'; queueMicrotask(() => this.onload()); } },
   location:{pathname:'/',search:''}, history:{replaceState() {}},
-  window:{innerWidth:1440,addEventListener() {}}, localStorage:{getItem:key => stored.get(key) ?? null,setItem:(key,value) => stored.set(key,String(value))},
+  window:{innerWidth:1440,innerHeight:900,addEventListener(type,handler) { (windowListeners.get(type) || windowListeners.set(type,[]).get(type)).push(handler); }}, localStorage:{getItem:key => stored.get(key) ?? null,setItem:(key,value) => stored.set(key,String(value))},
   setTimeout:() => 1, clearTimeout() {}, setInterval:(_,delay) => intervals.push(delay),
   confirm:() => allowDiscard, console,
   fetch:async (url, options = {}) => {
@@ -113,6 +118,7 @@ const context = {
       if (operation === 'save') { const payload = JSON.parse(options.body); if (payload.revision !== project.revision) return {ok:false,status:409,json:async () => ({error:'external change'})}; project.data = structuredClone(payload.data); project.revision += '-saved'; result = {revision:project.revision}; }
       else if (operation === 'upload') {
         const payload = JSON.parse(options.body);
+        if (payload.filename === 'hold.png') await new Promise(resolve => { releaseHeldUpload = resolve; });
         assert.equal(payload.revision,project.revision,'Batch imports must use the latest config revision');
         assert.equal(payload.asset_revision,project.asset_revision,'Batch imports must use the latest material revision');
         if (payload.filename === 'bad.png') return {ok:false,status:400,json:async () => ({error:'invalid test image'})};
@@ -171,10 +177,42 @@ assert(elements.get('draft-state'),'The workbench needs a visible draft state');
 assert.match(elements.get('draft-state').textContent,/已保存/);
 assert(elements.get('left-splitter'),'Materials and canvas need an adjustable separator');
 const leftBefore = Number(elements.get('left-splitter').getAttribute('aria-valuenow'));
-elements.get('left-splitter').onkeydown({key:'ArrowRight',preventDefault() {}});
+elements.get('left-splitter').onkeydown({key:'ArrowRight',preventDefault() {},stopPropagation() {}});
 assert(Number(elements.get('left-splitter').getAttribute('aria-valuenow')) > leftBefore,
   'Keyboard adjustment should enlarge the materials pane');
 assert(stored.has('sprite-workbench-layout'),'Layout size should survive a reload');
+elements.get('canvas-pane').clientHeight = 900;
+for (let i=0;i<8;i++) elements.get('timeline-splitter').onkeydown({key:'ArrowUp',preventDefault() {},stopPropagation() {}});
+assert.equal(Number(elements.get('timeline-splitter').getAttribute('aria-valuenow')),320);
+context.window.innerWidth = 667; context.window.innerHeight = 375;
+elements.get('canvas-pane').clientHeight = 0;
+windowListeners.get('resize').forEach(callback => callback());
+context.window.innerWidth = 1440; context.window.innerHeight = 900;
+elements.get('canvas-pane').clientHeight = 900;
+windowListeners.get('resize').forEach(callback => callback());
+assert.equal(Number(elements.get('timeline-splitter').getAttribute('aria-valuenow')),320,
+  'Returning from a hidden narrow canvas must restore the preferred timeline height');
+for (let i=0;i<8;i++) elements.get('left-splitter').onkeydown({key:'ArrowRight',preventDefault() {},stopPropagation() {}});
+for (let i=0;i<7;i++) elements.get('right-splitter').onkeydown({key:'ArrowLeft',preventDefault() {},stopPropagation() {}});
+assert.equal(Number(elements.get('left-splitter').getAttribute('aria-valuenow')),420);
+assert.equal(Number(elements.get('right-splitter').getAttribute('aria-valuenow')),460);
+context.window.innerWidth = 1101; elements.get('workspace').clientWidth = 1101;
+windowListeners.get('resize').forEach(callback => callback());
+context.window.innerWidth = 1440; // The resize event may run before clientWidth has caught up.
+windowListeners.get('resize').forEach(callback => callback());
+assert.equal(Number(elements.get('left-splitter').getAttribute('aria-valuenow')),420,
+  'Restoring desktop width must restore the preferred materials pane despite stale clientWidth');
+assert.equal(Number(elements.get('right-splitter').getAttribute('aria-valuenow')),460);
+elements.get('workspace').clientWidth = undefined;
+assert(observedResizes.has(elements.get('workspace')),
+  'Workbench widths should react when the workspace resizes without a window event');
+context.window.innerWidth = 1101; elements.get('workspace').clientWidth = 1101;
+observedResizes.get(elements.get('workspace'))();
+assert.equal(Number(elements.get('left-splitter').getAttribute('aria-valuenow')),210);
+context.window.innerWidth = 1440; elements.get('workspace').clientWidth = 1440;
+observedResizes.get(elements.get('workspace'))();
+assert.equal(Number(elements.get('left-splitter').getAttribute('aria-valuenow')),420);
+elements.get('workspace').clientWidth = undefined;
 assert(elements.get('pane-materials'),'Narrow screens need a visible Materials work-area choice');
 elements.get('pane-materials').onclick();
 assert.equal(body.dataset.pane,'materials');
@@ -295,6 +333,12 @@ assert.match(elements.get('preview-state').textContent,/待预览|待应用/);
 await previewSource();
 assert.match(elements.get('preview-state').textContent,/待应用/);
 assert.equal(previewRequests.filter(source => source === 'sheet.png').length,2,'Recipe edits need a fresh preview');
+state.data.sources['sheet.png'].process = {offset:[2,0]};
+renderAll();
+assert.match(elements.get('preview-state').textContent,/待预览/,
+  'A preview from an older recipe cannot be described as ready to apply');
+await previewSource();
+assert.match(elements.get('preview-state').textContent,/待应用/);
 state.source = 'slow.png'; const slowPreview = previewSource(); await flush();
 state.source = 'fast.png'; await previewSource();
 releaseSlowPreview(); await slowPreview;
@@ -354,4 +398,25 @@ assert.equal(projects.get('beta').revision,'disk-settings');
 await save();
 assert(dirty(),'A stale settings form must encounter a revision conflict');
 assert.deepEqual(projects.get('beta').data.frame_size,[64,64],'External canvas changes must survive');
+await openProject('alpha');
+state.data.actions.idle = {fps:12,sprites:['a.png','b.png']}; state.action = 'idle';
+state.assets = [{ref:'a.png',url:'/a.png',size:[32,32]},{ref:'b.png',url:'/b.png',size:[32,32]}];
+mode('action');
+const frameBeforeResize = state.selected;
+elements.get('left-splitter').focus();
+const resizeKey = {key:'ArrowRight',code:'ArrowRight',defaultPrevented:false,preventDefault() { this.defaultPrevented = true; },stopped:false,stopPropagation() { this.stopped = true; }};
+elements.get('left-splitter').onkeydown(resizeKey);
+if (!resizeKey.stopped) documentListeners.get('keydown').forEach(callback => callback(resizeKey));
+assert.equal(state.selected,frameBeforeResize,'Resizing with an arrow key must not step playback');
+player.pause(); elements.get('pane-materials').focus();
+documentListeners.get('keydown').forEach(callback => callback({key:' ',code:'Space',preventDefault() {}}));
+assert.equal(player.playing,false,'Space on a work-area button must not start playback');
+elements.get('pane-materials').onclick();
+processedInput.files = [imageFile('hold.png')];
+const heldImport = uploadFile(processedInput,'processed'); await flush();
+assert(elements.get('activity-state'),'Narrow tasks need a visible progress message outside the hidden canvas');
+assert.equal(elements.get('activity-state').hidden,false);
+assert.match(elements.get('activity-state').textContent,/1\/1.*hold.png/);
+releaseHeldUpload(); await heldImport;
+assert.equal(elements.get('activity-state').hidden,true);
 console.log('Workbench session: creation, routing, external changes, batch import/selection/deletion and references passed.');
