@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from .workbench import ConflictError, ExportCancelled, Project
+from .workbench import ConflictError, OperationCancelled, Project
 
 
 @dataclass
@@ -24,11 +24,15 @@ class ExportJob:
     content: bytes | None = None
     filename: str | None = None
     media_type: str | None = None
+    result: dict | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
     def summary(self) -> dict:
-        return {"id": self.id, "status": self.status, "completed": self.completed,
-                "total": self.total, "phase": self.phase, "error": self.error}
+        summary = {"id": self.id, "status": self.status, "completed": self.completed,
+                   "total": self.total, "phase": self.phase, "error": self.error}
+        if self.status == "done" and self.result is not None:
+            summary["result"] = self.result
+        return summary
 
 
 class ExportJobs:
@@ -49,13 +53,23 @@ class ExportJobs:
             oldest = min(finished, key=lambda job: job.created_at)
             del self.jobs[oldest.id]
 
-    def start(self, project_id: str, project: Project, data: dict, options: dict,
-              revision: str | None, asset_revision: str | None) -> dict:
+    def _new_job(self, project_id: str) -> ExportJob:
         with self.lock:
             self._prune()
             job = ExportJob(id=secrets.token_urlsafe(12), project_id=project_id)
             self.jobs[job.id] = job
+            return job
+
+    def start(self, project_id: str, project: Project, data: dict, options: dict,
+              revision: str | None, asset_revision: str | None) -> dict:
+        job = self._new_job(project_id)
         self.pool.submit(self._run, job, project, data, options, revision, asset_revision)
+        return job.summary()
+
+    def start_prepare(self, project_id: str, project: Project, data: dict,
+                      revision: str | None, asset_revision: str | None) -> dict:
+        job = self._new_job(project_id)
+        self.pool.submit(self._run_prepare, job, project, data, revision, asset_revision)
         return job.summary()
 
     def _run(self, job: ExportJob, project: Project, data: dict, options: dict,
@@ -75,7 +89,26 @@ class ExportJobs:
                 else:
                     job.content, job.filename, job.media_type = content, filename, media_type
                     job.status, job.phase = "done", "已完成"
-        except ExportCancelled:
+        except OperationCancelled:
+            with self.lock:
+                job.status, job.phase = "cancelled", "已取消"
+        except Exception as error:
+            with self.lock:
+                job.status, job.error = "failed", str(error)
+
+    def _run_prepare(self, job: ExportJob, project: Project, data: dict,
+                     revision: str | None, asset_revision: str | None) -> None:
+        def progress(completed: int, total: int, phase: str) -> None:
+            with self.lock:
+                job.completed, job.total, job.phase = completed, total, phase
+        with self.lock:
+            job.status = "running"
+        try:
+            result = project.prepare(data, revision, asset_revision,
+                                     progress=progress, cancelled=job.cancel_event)
+            with self.lock:
+                job.result, job.status, job.phase = result, "done", "已完成"
+        except OperationCancelled:
             with self.lock:
                 job.status, job.phase = "cancelled", "已取消"
         except Exception as error:

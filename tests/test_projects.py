@@ -372,6 +372,24 @@ class ProjectWorkflowTests(unittest.TestCase):
             self.assertEqual(status["status"], "cancelled")
             self.assertEqual(self.client.get(f"/api/projects/fish/jobs/{job_id}/download").status_code, 409)
 
+    def test_prepare_job_reports_source_progress_and_returns_snapshot(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
+        response = self.client.post("/api/projects/fish/jobs/prepare", headers=self.headers,
+                                    json={"data": snapshot["data"], "revision": snapshot["revision"],
+                                          "asset_revision": snapshot["asset_revision"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        job_id = response.json()["id"]
+        for _ in range(100):
+            status = self.client.get(f"/api/projects/fish/jobs/{job_id}").json()
+            if status["status"] in {"done", "failed", "cancelled"}:
+                break
+            time.sleep(.02)
+        self.assertEqual(status["status"], "done", status)
+        self.assertEqual(status["completed"], status["total"])
+        self.assertEqual(len(status["result"]["assets"]),1)
+        self.assertTrue((self.root / "fish/processed_sprites/walk/000.png").is_file())
+
     def test_history_storage_link_cannot_write_outside_project(self):
         snapshot = self.create()
         outside = self.root.parent / "outside-history"

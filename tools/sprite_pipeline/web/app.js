@@ -858,7 +858,38 @@ function restoreHistory(redo) {
   player.pause(); renderAll(); if (state.mode === 'source') schedulePreview();
 }
 $('#undo').onclick = () => restoreHistory(false); $('#redo').onclick = () => restoreHistory(true);
-$('#prepare').onclick = () => task('正在准备缺失素材…',async () => { const snapshot = await api('prepare',payload()); setSnapshot(snapshot); toast('缺失素材已准备，已有 processed 图片保持原样'); });
+let prepareJobId = null;
+$('#job-cancel').onclick = async () => {
+  if (!prepareJobId) return;
+  $('#job-cancel').disabled = true;
+  $('#job-status').textContent = '正在取消，当前原图处理结束后停止…';
+  try { await api(`jobs/${prepareJobId}/cancel`,{}); }
+  catch (error) { $('#job-cancel').disabled = false; toast(error.message,true); }
+};
+$('#prepare').onclick = () => task('正在准备缺失素材…',async () => {
+  $('#job-banner').hidden = false; $('#job-cancel').disabled = true;
+  $('#job-status').textContent = '正在启动素材准备…';
+  $('#job-progress').value = 0;
+  try {
+    const job = await api('jobs/prepare',payload());
+    prepareJobId = job.id; $('#job-cancel').disabled = false;
+    let status;
+    do {
+      status = await api(`jobs/${job.id}`);
+      if (!$('#job-cancel').disabled || ['done','failed','cancelled'].includes(status.status))
+        $('#job-status').textContent = `${status.phase} · ${status.completed}/${status.total || '?'} 张`;
+      $('#job-progress').max = Math.max(1,status.total);
+      $('#job-progress').value = status.completed;
+      if (['done','failed','cancelled'].includes(status.status)) break;
+      await new Promise(resolve => setTimeout(resolve,400));
+    } while (true);
+    if (status.status === 'cancelled') { toast('素材准备已取消，工程未改动'); return; }
+    if (status.status === 'failed') throw new Error(status.error || '素材准备失败');
+    setSnapshot(status.result); toast('缺失素材已准备，已有 processed 图片保持原样');
+  } finally {
+    prepareJobId = null; $('#job-banner').hidden = true; $('#job-progress').value = 0;
+  }
+});
 $('#migrate').onclick = () => task('正在保留最终帧…',async () => {
   const snapshot = await api('migrate',payload()); setSnapshot(snapshot); toast(`已保留 ${snapshot.imported} 张不同于 processed 的最终帧，并更新动作引用`);
 });

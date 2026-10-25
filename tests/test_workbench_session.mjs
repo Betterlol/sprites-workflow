@@ -97,6 +97,8 @@ const context = {
       else result = {token:'session',workspace_root:'/workspaces',projects:[...projects.keys()].map(id => ({id,name:id,character:id,frame_size:[32,32]}))};
     } else if (url.endsWith('/jobs/export')) result = {id:'job-1',status:'queued',completed:0,total:1,phase:'等待开始'};
     else if (url.endsWith('/jobs/job-1')) result = {id:'job-1',status:'done',completed:1,total:1,phase:'已完成'};
+    else if (url.endsWith('/jobs/prepare')) result = {id:'prep-1',status:'queued',completed:0,total:1,phase:'等待开始'};
+    else if (url.endsWith('/jobs/prep-1')) result = {id:'prep-1',status:'done',completed:1,total:1,phase:'已完成',result:projects.get(url.match(/projects\/([^/]+)/)[1])};
     else {
       const [,id,operation] = url.match(/^\/api\/projects\/([^/]+)(?:\/(\w+))?$/) || [];
       const project = projects.get(decodeURIComponent(id)); assert(project,`Unknown request ${url}`);
@@ -262,6 +264,8 @@ state.source = 'slow.png'; const slowPreview = previewSource(); await flush();
 state.source = 'fast.png'; await previewSource();
 releaseSlowPreview(); await slowPreview;
 assert.equal(state.previewSource,'fast.png','Late preview must not replace the selected source');
+await elements.get('prepare').onclick();
+assert(requests.some(request => request.url.endsWith('/jobs/prepare')),'Source preparation should report progress through a job');
 await openProject('alpha');
 state.data.project.name = 'Local title';
 projects.get('alpha').data.notes = ['disk note']; projects.get('alpha').revision = 'disk-merge';

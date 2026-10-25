@@ -36,7 +36,11 @@ class ConflictError(ValueError):
     """The on-disk project changed since the editor loaded it."""
 
 
-class ExportCancelled(Exception):
+class OperationCancelled(Exception):
+    """A long operation was stopped at a safe item boundary."""
+
+
+class ExportCancelled(OperationCancelled):
     """An export was stopped at a safe item boundary."""
 
 
@@ -348,22 +352,34 @@ class Project:
                 write_json(self.path, cfg.data)
             return self.state()
 
-    def prepare(self, data: dict, revision: str, asset_revision: str | None = None) -> dict:
+    def prepare(self, data: dict, revision: str, asset_revision: str | None = None,
+                *, progress=None, cancelled=None) -> dict:
         """Prepare absent sources only; existing processed artwork is never rebuilt."""
         with self.lock:
             self.check_revision(revision)
             self.check_assets(asset_revision)
             cfg = self.draft(data)
             pending = []
-            for filename in cfg.discover_sources():
+            sources = cfg.discover_sources()
+            if progress is not None:
+                progress(0, len(sources), "准备原图")
+            for index, filename in enumerate(sources, 1):
+                if cancelled is not None and cancelled.is_set():
+                    raise OperationCancelled("Preparation cancelled")
                 directory = inside(cfg.directory("processed_sprites"), cfg.source_id(filename))
                 if not list(directory.glob("*.png")):
                     rendered = self.render(cfg.data, filename)
                     pending.append((filename, rendered))
+                if progress is not None:
+                    progress(index, len(sources), filename)
+                if cancelled is not None and cancelled.is_set():
+                    raise OperationCancelled("Preparation cancelled")
             # Render all sources before making any changes on validation failure.
             validate_editor(cfg)
             self.check_revision(revision)
             self.check_assets(asset_revision)
+            if cancelled is not None and cancelled.is_set():
+                raise OperationCancelled("Preparation cancelled")
             directories = [inside(cfg.directory("processed_sprites"), cfg.source_id(filename)) for filename, _ in pending]
             with self.history_transaction("prepare", [self.path, *directories]):
                 for filename, (_, _, frames, descriptors, scale) in pending:

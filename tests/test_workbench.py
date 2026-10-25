@@ -255,6 +255,24 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(image_path.read_bytes(), before)
 
+    def test_prepare_can_cancel_after_rendering_without_writing_pixels(self):
+        from sprite_pipeline import workbench
+        self.assertTrue(hasattr(workbench, "OperationCancelled"))
+        cancelled = threading.Event()
+        progress = []
+        before = self.path.read_bytes()
+
+        def report(completed, total, phase):
+            progress.append((completed,total,phase))
+            if completed == 1:
+                cancelled.set()
+
+        with self.assertRaises(workbench.OperationCancelled):
+            Project(self.path).prepare(self.data,self.revision,progress=report,cancelled=cancelled)
+        self.assertEqual(progress[-1][:2],(1,1))
+        self.assertEqual(self.path.read_bytes(),before)
+        self.assertFalse((self.root / "processed_sprites/walk/000.png").exists())
+
     def test_portable_project_export_can_be_reopened_after_original_is_gone(self):
         self.apply()
         response = self.post("export", options={"format": "project"})

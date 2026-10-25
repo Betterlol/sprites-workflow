@@ -120,6 +120,11 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
         return jobs.start(project_id, store.get(project_id), payload["data"], payload.get("options", {}),
                           payload.get("revision"), payload.get("asset_revision"))
 
+    @app.post("/api/projects/{project_id}/jobs/prepare")
+    def start_prepare_job(project_id: str, payload: dict = Body(...)):
+        return jobs.start_prepare(project_id, store.get(project_id), payload["data"],
+                                  payload.get("revision"), payload.get("asset_revision"))
+
     @app.get("/api/projects/{project_id}/jobs/{job_id}")
     def get_export_job(project_id: str, job_id: str):
         return jobs.status(project_id, job_id)
