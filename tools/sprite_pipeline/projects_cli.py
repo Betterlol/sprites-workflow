@@ -55,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
             selection.add_argument("--review", help="Inspect one saved Review")
             selection.add_argument("--ref", action="append", dest="references",
                                    help="Inspect processed references in the given order; repeat for each slot")
+            selection.add_argument("--sequence", type=Path,
+                                   help="JSON with ordered processed refs, duration_ms and loop")
             command.add_argument("--mode", choices=("runtime", "display"),
                                  help="Action playback mode; defaults to runtime")
             command.add_argument("--output", type=Path, required=True,
@@ -109,8 +111,10 @@ def main(argv: list[str] | None = None) -> int:
                         output.write(content)
                     result = {"output": str(args.output.resolve()), "bytes": len(content)}
                 elif args.command == "qa":
+                    sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
                     result = render_qa(cfg, action=args.action, review=args.review,
-                                       references=args.references, mode=args.mode, output=args.output)
+                                       references=args.references, sequence=sequence,
+                                       mode=args.mode, output=args.output)
                 else:
                     revision = args.revision or project.revision
                     assets = args.asset_revision or project.changes()["asset_revision"]

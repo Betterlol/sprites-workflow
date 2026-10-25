@@ -241,3 +241,47 @@ class QaTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(json.loads(stdout.getvalue())["steps"], 3)
         self.assertTrue((output / "report.json").exists())
+
+    def test_explicit_sequence_controls_timing_without_modifying_actions(self):
+        saved = self.cfg.path.read_bytes()
+        sequence = {"loop": 2, "steps": [
+            {"ref": "walk/002.png", "duration_ms": 60},
+            {"ref": "walk/000.png", "duration_ms": 140},
+            {"ref": "walk/002.png", "duration_ms": 80},
+        ]}
+        manifest = self.root / "sequence.json"
+        manifest.write_text(json.dumps(sequence), encoding="utf-8")
+        output = self.root / "sequence-qa"
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                code = manage(["--workspace-root", str(self.workspaces), "--json", "qa", "fish",
+                               "--sequence", str(manifest), "--output", str(output)])
+            except SystemExit as error:
+                code = error.code
+        self.assertEqual(code, 0, stderr.getvalue())
+        report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["mode"], "sequence")
+        self.assertEqual(report["loop"], 2)
+        self.assertEqual([step["duration_ms"] for step in report["steps"]], [60, 140, 80])
+        self.assertEqual([step["ref"] for step in report["steps"]],
+                         ["walk/002.png", "walk/000.png", "walk/002.png"])
+        self.assertEqual(report["duration_ms"], 280)
+        with Image.open(output / "preview.gif") as gif:
+            self.assertEqual(gif.info["loop"], 1)
+        self.assertEqual(self.cfg.path.read_bytes(), saved)
+
+    def test_invalid_explicit_sequence_is_rejected_before_output(self):
+        from sprite_pipeline.qa import render_qa
+        invalid = [
+            {"loop": True, "steps": [{"ref": "walk/000.png", "duration_ms": 100}]},
+            {"loop": 1, "steps": []},
+            {"loop": 1, "steps": [{"ref": "../outside.png", "duration_ms": 100}]},
+            {"loop": 1, "steps": [{"ref": "walk/000.png", "duration_ms": 0}]},
+        ]
+        for index, sequence in enumerate(invalid):
+            with self.subTest(sequence=sequence):
+                output = self.root / f"invalid-sequence-{index}"
+                with self.assertRaises(ValueError):
+                    render_qa(self.cfg, sequence=sequence, output=output)
+                self.assertFalse(output.exists())

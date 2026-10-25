@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 from .animation import playback
 from .config import Config, config_from_data, inside, positive
 from .gif import encode_gif
+from .sequence import sequence_steps
 from .workbench import action_steps, review_steps
 
 
@@ -56,15 +57,16 @@ def _contact_pages(folder: Path, steps: list[dict], images: dict[str, Image.Imag
 
 
 def render_qa(cfg: Config, *, action: str | None = None, review: str | None = None,
-              references: list[str] | None = None, mode: str | None = None,
+              references: list[str] | None = None, sequence: dict | None = None,
+              mode: str | None = None,
               output: Path) -> dict:
     """Write a new evidence directory; never modify the project or existing output."""
     config_bytes = cfg.path.read_bytes()
     current = config_from_data(json.loads(config_bytes), cfg.path, cfg.root)
     if current.data != cfg.data:
         raise ValueError("Project config changed since it was loaded; retry QA")
-    if sum(value is not None for value in (action, review, references)) != 1:
-        raise ValueError("Choose exactly one action, Review, or processed reference list")
+    if sum(value is not None for value in (action, review, references, sequence)) != 1:
+        raise ValueError("Choose exactly one action, Review, processed reference list, or sequence")
     if action is not None:
         mode = mode or "runtime"
         steps = action_steps(cfg, action, mode)
@@ -81,6 +83,13 @@ def render_qa(cfg: Config, *, action: str | None = None, review: str | None = No
         mode = saved.get("mode", "runtime")
         loop = 0 if saved.get("loop", True) else 1
         source = {"review": review}
+    elif sequence is not None:
+        if mode is not None:
+            raise ValueError("Sequence timing and loop come from the sequence JSON")
+        steps, loop = sequence_steps(cfg, sequence)
+        mode = "sequence"
+        source = {"sequence_sha256": hashlib.sha256(
+            json.dumps(sequence, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()}
     else:
         if mode is not None:
             raise ValueError("Raw processed references use the project default FPS")
