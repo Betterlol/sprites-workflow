@@ -98,6 +98,7 @@ const observedResizes = new Map();
 let releaseSlowPreview = null;
 let releaseHeldUpload = null;
 let allowDiscard = true;
+const confirmationMessages = [];
 let pausedProject = null, resumeSnapshot = null;
 let holdDragPreview = false, releaseDragPreview;
 const context = {
@@ -107,7 +108,7 @@ const context = {
   location:{pathname:'/',search:''}, history:{replaceState() {}},
   window:{innerWidth:1440,innerHeight:900,addEventListener(type,handler) { (windowListeners.get(type) || windowListeners.set(type,[]).get(type)).push(handler); }}, localStorage:{getItem:key => stored.get(key) ?? null,setItem:(key,value) => stored.set(key,String(value))},
   setTimeout:() => 1, clearTimeout() {}, setInterval:(_,delay) => intervals.push(delay),
-  confirm:() => allowDiscard, console,
+  confirm:message => { confirmationMessages.push(message); return allowDiscard; }, console,
   fetch:async (url, options = {}) => {
     requests.push({url,options});
     let result;
@@ -543,3 +544,82 @@ assert(applied);
 assert.deepEqual(JSON.parse(applied.options.body).data.sources['drag.png'].process.overrides['001'].offset,[16,-4]);
 assert(!dirty());
 console.log('Workbench drag preview: scaled movement, accumulation, cancellation, stale responses, undo and explicit apply passed.');
+
+// Sequence deletion is available beside the list and changes only the draft.
+const deletionProject = snapshot('alpha');
+deletionProject.assets = [{ref:'a.png',url:'/a.png',size:[32,32]},{ref:'b.png',url:'/b.png',size:[32,32]}];
+deletionProject.data.actions = {
+  idle:{fps:12,sprites:['a.png']},wave:{fps:12,sprites:['a.png','b.png']},
+};
+deletionProject.data.workbench.reviews = {
+  transition:{name:'挥手衔接',mode:'runtime',loop:false,clips:[{action:'wave',repeat:1,start:0,end:null}]},
+  remaining:{name:'待机检查',mode:'runtime',loop:false,clips:[{action:'idle',repeat:3,start:0,end:null}]},
+};
+projects.set('alpha',deletionProject); await openProject('alpha');
+state.action = 'wave'; mode('action');
+const deleteItem = elements.get('delete-item');
+assert.equal(deleteItem.hidden,false,'Action deletion must be visible above the action list');
+assert.equal(deleteItem.disabled,false,'Actions can be deleted even when there are no reference images');
+const requestsBeforeSequenceDelete = requests.length;
+const assetsBeforeSequenceDelete = JSON.stringify(state.assets);
+const projectBeforeSequenceDelete = JSON.stringify(deletionProject.data);
+await deleteItem.onclick();
+assert(state.data.actions.wave,'An action used by a Review must survive deletion attempts');
+assert.match(elements.get('toast').textContent,/挥手衔接/,'Explain which Review still uses the action');
+assert.equal(state.history.length,0,'Blocked deletion must not create an undo step');
+
+state.data.actions.empty = {fps:12,loop:false,sprites:null}; // A newly created, unsaved action.
+state.action = 'empty'; renderAll(); player.playing = true;
+allowDiscard = false; await deleteItem.onclick();
+assert(state.data.actions.empty,'Cancelling the confirmation preserves the action');
+assert.equal(player.playing,true); assert.equal(state.history.length,0);
+allowDiscard = true; await deleteItem.onclick();
+assert(!state.data.actions.empty,'Empty actions can be deleted through the list');
+assert.equal(player.playing,false,'Successful deletion stops playback');
+assert.equal(state.history.length,1); assert(!dirty(),'Deleting a newly added, unsaved action restores the saved configuration');
+context.hooks.restoreHistory(false); assert(state.data.actions.empty);
+context.hooks.restoreHistory(true); assert(!state.data.actions.empty);
+
+state.review = 'transition'; mode('review'); player.index = 1; player.playing = true;
+assert.equal(deleteItem.hidden,false,'Review deletion must be visible above the Review list');
+assert.equal(deleteItem.disabled,false);
+allowDiscard = false; await deleteItem.onclick();
+assert(state.data.workbench.reviews.transition,'Cancelling preserves the complete Review');
+assert.equal(player.playing,true);
+allowDiscard = true; await deleteItem.onclick();
+assert(!state.data.workbench.reviews.transition);
+assert(dirty(),'Deleting a saved Review marks the project as an unsaved draft');
+assert(state.data.workbench.reviews.remaining,'Deleting a Review must preserve other sequences');
+assert(state.data.actions.wave,'Deleting a Review must preserve its actions');
+assert.equal(player.playing,false); assert.equal(player.index,0,'The next Review starts at its first step');
+assert.equal(state.clip,0);
+assert(confirmationMessages.some(message => /挥手衔接/.test(message)),'Review confirmation identifies the selected sequence');
+context.hooks.restoreHistory(false); assert(state.data.workbench.reviews.transition);
+context.hooks.restoreHistory(true); assert(!state.data.workbench.reviews.transition);
+
+state.action = 'wave'; mode('action');
+state.busy = true; renderAll(); assert.equal(deleteItem.disabled,true);
+await deleteItem.onclick(); assert(state.data.actions.wave,'Busy operations block deletion');
+state.busy = false; renderAll();
+elements.get('delete-action').click();
+assert(!state.data.actions.wave,'The inspector uses the same deletion behavior as the list');
+assert(state.data.actions.idle);
+state.review = 'remaining'; mode('review');
+elements.get('delete-review').click();
+assert.deepEqual(Object.keys(state.data.workbench.reviews),[]);
+assert.equal(deleteItem.disabled,true,'Deleting the final Review leaves an inert delete button');
+const historyAfterLastReview = state.history.length;
+await deleteItem.onclick(); assert.equal(state.history.length,historyAfterLastReview);
+assert.equal(player.steps.length,0);
+mode('action'); await deleteItem.onclick();
+assert.deepEqual(Object.keys(state.data.actions),[],'Deleting the final action is supported');
+assert.equal(deleteItem.disabled,true); assert.equal(player.steps.length,0);
+assert.equal(JSON.stringify(state.assets),assetsBeforeSequenceDelete,'Deleting sequences preserves all sprite materials');
+assert.equal(JSON.stringify(deletionProject.data),projectBeforeSequenceDelete,'Sequence deletion is not saved implicitly');
+assert.equal(requests.length,requestsBeforeSequenceDelete,'Draft deletion does not call material deletion or save endpoints');
+await save();
+assert.deepEqual(Object.keys(projects.get('alpha').data.actions),[]);
+assert.deepEqual(Object.keys(projects.get('alpha').data.workbench.reviews),[]);
+assert.equal(JSON.stringify(projects.get('alpha').assets),assetsBeforeSequenceDelete);
+assert(!dirty(),'Explicit saving persists action and Review deletion');
+console.log('Workbench sequence deletion: list/inspector access, reference protection, confirmation, empty states, undo and explicit save passed.');

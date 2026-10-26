@@ -155,7 +155,7 @@ function updateSaveStatus() {
   $('#save').disabled = state.busy || !dirty();
   $('#prepare').disabled = state.busy || !state.sources.length;
   $('#migrate').disabled = state.busy || !state.legacyCount;
-  $('#delete-item').disabled = state.busy || !(state.mode === 'source' ? state.source : state.reference);
+  $('#delete-item').disabled = state.busy || !state[state.mode];
   $('#assets-delete').disabled = state.busy || !state.assetSelection.size;
   $('#assets-add').disabled = state.busy || !state.assetSelection.size || state.mode !== 'action' || !state.data || !currentAction() || state.playbackMode !== 'runtime';
 }
@@ -392,8 +392,9 @@ function renderAll() {
   $('#editor-title').textContent = state.mode === 'source' ? state.source || '添加原图' : state.mode === 'action' ? state.action || '新建动作' : state.mode === 'reference' ? referenceInfo()?.file || '添加参考图' : currentReview()?.name || '新建 Review';
   $('#sidebar-title').textContent = {source:'原图',action:'动作库',review:'Review 序列',reference:'参考图'}[state.mode];
   $('#new-item').setAttribute('aria-label', {source:'批量导入原图',action:'新建动作',review:'新建 Review',reference:'批量导入参考图'}[state.mode]);
-  $('#delete-item').hidden = !['source','reference'].includes(state.mode);
-  $('#delete-item').textContent = state.mode === 'source' ? '删除原图' : '删除参考图';
+  $('#delete-item').hidden = false;
+  $('#delete-item').textContent = {source:'删除原图',reference:'删除参考图',action:'删除动作',review:'删除序列'}[state.mode];
+  $('#delete-item').setAttribute('aria-label', {source:'删除所选原图',reference:'删除所选参考图',action:'删除所选动作',review:'删除所选 Review 序列'}[state.mode]);
   $('#timeline-title').textContent = {source:'处理结果 · 点击查看单帧',action:state.playbackMode === 'runtime' ? '游戏帧时间轴' : '展示播放时间轴',review:'动作衔接时间轴',reference:'参考资料'}[state.mode];
   $('#timeline-help').textContent = {source:'处理结果中拖动图片微调位置 · 原图模式下拖拽画框',action:'拖拽排序 · 点击素材添加 · Delete 移除所选帧',review:'拖拽动作片段排序 · 片段按指定次数播放',reference:'参考图独立保存，不参与切图；完整工程备份会包含参考资料'}[state.mode];
   renderItems(); renderLibraryFilters(); renderLibrary(); renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus();
@@ -668,10 +669,7 @@ function bindActionInspector() {
     if (!source) { toast('此帧是已确认或导入的独立素材，可直接在外部修图后重新导入'); return; }
     state.source = source.file; mode('source');
   });
-  $('#delete-action')?.addEventListener('click', () => {
-    if (Object.values(reviews()).some(review => review.clips.some(clip => clip.action === state.action))) { toast('此动作仍被 Review 引用，请先移除相应片段',true); return; }
-    if (confirm(`删除动作 ${state.action}？素材图片会保留，可撤销。`)) change(() => { delete state.data.actions[state.action]; state.action = Object.keys(state.data.actions)[0]; state.selected = 0; });
-  });
+  $('#delete-action').onclick = () => deleteSequence('action');
 }
 
 function resolvedSource() {
@@ -831,7 +829,7 @@ function bindReviewInspector() {
     $('#before-boundary').onclick = () => seekBoundary(true); $('#after-boundary').onclick = () => seekBoundary(false);
     $('#remove-current-clip').onclick = () => change(() => { review.clips.splice(state.clip,1); state.clip = Math.max(0,state.clip - 1); });
   }
-  $('#delete-review').onclick = () => change(() => { delete reviews()[state.review]; state.review = Object.keys(reviews())[0]; state.clip = 0; });
+  $('#delete-review').onclick = () => deleteSequence('review');
 }
 
 // Drag only the selected preview image; stored PNGs and alignment overlays stay put.
@@ -948,6 +946,26 @@ $('#asset-multiselect').onchange = () => { state.libraryMulti = $('#asset-multis
 $('#assets-select-visible').onclick = () => { state.libraryMulti = true; visibleAssets().forEach(a => state.assetSelection.add(a.ref)); renderLibrary(); };
 $('#assets-clear').onclick = () => { state.assetSelection.clear(); state.lastAsset = null; renderLibrary(); };
 $('#assets-add').onclick = () => addAssets(state.assets.filter(a => state.assetSelection.has(a.ref)).map(a => a.ref));
+function deleteSequence(kind) {
+  if (state.busy || !state.data || !['action','review'].includes(kind)) return;
+  const id = state[kind], sequences = kind === 'action' ? state.data.actions : reviews();
+  if (!id || !sequences[id]) return;
+  if (kind === 'action') {
+    const usedBy = Object.entries(reviews()).filter(([,review]) => review.clips.some(clip => clip.action === id));
+    if (usedBy.length) {
+      toast(`此动作仍被 Review「${usedBy.map(([key,review]) => review.name || key).join('、')}」引用，请先移除相应片段或删除这些序列`,true);
+      return;
+    }
+  }
+  const name = kind === 'action' ? `动作 ${id}` : `Review 序列「${sequences[id].name || id}」`;
+  const retained = kind === 'action' ? '素材图片' : '动作和素材图片';
+  if (!confirm(`删除${name}？${retained}会保留，可撤销；保存工程后生效。`)) return;
+  player.pause(); player.index = 0;
+  change(() => {
+    delete sequences[id]; state[kind] = Object.keys(sequences)[0]; state.selected = 0; state.clip = 0;
+  });
+  toast(`已删除${name}，可撤销；保存工程后生效`);
+}
 async function deleteMaterials(kind, references) {
   if (state.busy || !references.length) return;
   const message = kind === 'source' ? `删除原图 ${references.join('、')}？将同时删除对应切片和 processed，并保存当前工程。`
@@ -960,7 +978,10 @@ async function deleteMaterials(kind, references) {
   });
 }
 $('#assets-delete').onclick = () => deleteMaterials('processed',state.assets.filter(a => state.assetSelection.has(a.ref)).map(a => a.ref));
-$('#delete-item').onclick = () => state.mode === 'source' ? deleteMaterials('source',state.source ? [state.source] : []) : deleteMaterials('reference',state.reference ? [state.reference] : []);
+$('#delete-item').onclick = () => {
+  if (['action','review'].includes(state.mode)) return deleteSequence(state.mode);
+  return state.mode === 'source' ? deleteMaterials('source',state.source ? [state.source] : []) : deleteMaterials('reference',state.reference ? [state.reference] : []);
+};
 $('#new-item').onclick = () => {
   if (state.mode === 'source') { $('#source-upload').click(); return; }
   if (state.mode === 'reference') { $('#reference-upload').click(); return; }
