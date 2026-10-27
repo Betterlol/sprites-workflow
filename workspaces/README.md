@@ -101,3 +101,7 @@ python tools/build_sprites.py pack --config workspaces/dafeiyu/pipeline.json
 7. 子动作、局部接缝 Review 与完整动作使用相同的实际边界和运行时节奏，记录去重与停顿。按制作流程核对展开后的引用与时长，再逐段、逐缝和全段检查。素材、参数或编排变化后重新验收受影响范围，不能以配置校验或导出成功代替视觉检查。
 
 已有 `assets/` 由用户自行整理，程序不做自动迁移。旧目录可用 `python tools/serve_sprites.py --config <原pipeline.json>` 显式打开。工作区列表中的工程要求 source 位于本工程内。
+
+## 独立保存切割
+
+`python tools/projects.py save-slices <工程ID> --source <原图>` 保存当前原图的切割规则和原尺寸切片。可用 `--extract <仅extract规则的JSON>` 提供新规则，并用 `--revision`、`--asset-revision` 拒绝过期提交。该操作不应用处理或保存其他动作草稿；`source_sprites/` 缓存仍可重建。详见 [网页工作流程](../docs/workbench.md)。

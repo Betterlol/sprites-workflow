@@ -144,6 +144,15 @@ export class Player {
       ctx.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
       ctx.strokeRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
       ctx.fillStyle = '#5fddc8'; ctx.font = `${Math.max(12, this.size[0] / 45)}px Consolas`; ctx.fillText(String(index + 1).padStart(2, '0'), box[0] + 6, box[1] + Math.max(20, this.size[0] / 40));
+      if (index === selected) {
+        const [x,y,right,bottom]=box, middleX=(x+right)/2, middleY=(y+bottom)/2;
+        const ratio=this.size[0]/Math.max(1,this.canvas.getBoundingClientRect().width);
+        const side=7*ratio;
+        ctx.fillStyle='#effff9'; ctx.strokeStyle='#147d73'; ctx.lineWidth=ratio;
+        for (const [hx,hy] of [[x,y],[middleX,y],[right,y],[right,middleY],[right,bottom],[middleX,bottom],[x,bottom],[x,middleY]]) {
+          ctx.fillRect(hx-side/2,hy-side/2,side,side); ctx.strokeRect(hx-side/2,hy-side/2,side,side);
+        }
+      }
     });
   }
   tick(timestamp) {

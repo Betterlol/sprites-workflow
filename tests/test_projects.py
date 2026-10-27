@@ -330,6 +330,25 @@ class ProjectWorkflowTests(unittest.TestCase):
                                      "--revision", deleted["revision"], "--asset-revision", deleted["asset_revision"]]), 0)
         self.assertTrue((self.root / "fish/processed_sprites/imports/manual.png").exists())
 
+    def test_cli_saves_slices_and_history_restores_their_previous_recipe(self):
+        snapshot = self.create()
+        snapshot = self.import_image(snapshot, filename='a.png').json()
+        rules_path = self.root.parent / 'cuts.json'
+        rules_path.write_text(json.dumps({'method':'boxes','boxes':[[0,0,16,16]],'region_ids':['005'],'next_id':6}))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(manage(['--workspace-root',str(self.root),'save-slices','fish','--source','a.png',
+                                     '--extract',str(rules_path),'--revision',snapshot['revision'],
+                                     '--asset-revision',snapshot['asset_revision']]),0)
+        saved = json.loads(output.getvalue())
+        self.assertTrue((self.root/'fish/source_sprites/a/005.png').exists())
+        self.assertEqual(saved['data']['sources']['a.png']['extract']['region_ids'],['005'])
+        self.assertEqual(saved['assets'],snapshot['assets'])
+        project = self.store.get('fish')
+        restored = project.restore(project.history_entries()[0]['id'],saved['revision'],saved['asset_revision'])
+        self.assertEqual(restored['data'],snapshot['data'])
+        self.assertFalse((self.root/'fish/source_sprites/a/005.png').exists())
+
     def test_export_job_reports_progress_and_downloads_complete_zip(self):
         snapshot = self.create()
         snapshot = self.import_image(snapshot, kind="processed", filename="pose.png").json()
@@ -710,6 +729,9 @@ class ProjectWorkflowTests(unittest.TestCase):
         snapshot = self.post("prepare", snapshot).json()
         cfg = load_config(self.root / "fish/pipeline.json")
         extract_source(cfg, "a.png")
+        response = self.post("delete", snapshot, kind="source", references=["a.png"])
+        self.assertEqual(response.status_code, 409, 'External slice edits invalidate the asset revision')
+        snapshot = self.snapshot()
         snapshot["data"]["actions"] = {"idle": {"sprites": ["a/000.png"]}}
         response = self.post("delete", snapshot, kind="source", references=["a.png"])
         self.assertEqual(response.status_code, 400, response.text)

@@ -126,9 +126,16 @@ const context = {
     else if (url.endsWith('/jobs/prepare')) result = {id:'prep-1',status:'queued',completed:0,total:1,phase:'等待开始'};
     else if (url.endsWith('/jobs/prep-1')) result = {id:'prep-1',status:'done',completed:1,total:1,phase:'已完成',result:projects.get(url.match(/projects\/([^/]+)/)[1])};
     else {
-      const [,id,operation] = url.match(/^\/api\/projects\/([^/]+)(?:\/(\w+))?$/) || [];
+      const [,id,operation] = url.match(/^\/api\/projects\/([^/]+)(?:\/([\w-]+))?$/) || [];
       const project = projects.get(decodeURIComponent(id)); assert(project,`Unknown request ${url}`);
       if (operation === 'save') { const payload = JSON.parse(options.body); if (payload.revision !== project.revision) return {ok:false,status:409,json:async () => ({error:'external change'})}; project.data = structuredClone(payload.data); project.revision += '-saved'; result = {revision:project.revision}; }
+      else if (operation === 'save-slices') {
+        const payload = JSON.parse(options.body);
+        assert(!payload.data,'Scoped slicing save must not submit the whole draft');
+        project.data.sources[payload.source] ||= {};
+        project.data.sources[payload.source].extract = structuredClone(payload.extract);
+        project.revision += '-slices'; project.asset_revision += '-slices'; result = project;
+      }
       else if (operation === 'upload') {
         const payload = JSON.parse(options.body);
         if (payload.filename === 'hold.png') await new Promise(resolve => { releaseHeldUpload = resolve; });
@@ -183,8 +190,10 @@ let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import
 let layoutSource;
 try { layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout.js',import.meta.url),'utf8'); } catch {}
 if (layoutSource) Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64')));
+const slicingModule = await readFile(new URL('../tools/sprite_pipeline/web/slicing.js',import.meta.url),'utf8');
+Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(slicingModule).toString('base64')));
 source = source.replace(/^import [^\r\n]*\r?\n/gm,'');
-source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';
+source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,saveSlices:typeof saveSlices === "function" ? saveSlices : save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';
 vm.runInNewContext(source,context,{filename:'app.js'});
 const flush = () => new Promise(resolve => setImmediate(resolve));
 await flush();
@@ -661,6 +670,26 @@ assert.equal(state.preview.stage,'process','Late extraction must not replace adj
 assert.equal(tabs.filter(tab => tab.classList.contains('active')).length,1);
 assert.equal(tabs.find(tab => tab.classList.contains('active')).dataset.view,'processed');
 console.log('Workbench workflow: isolated slicing/adjustment previews and preserved drafts passed.');
+const sliceProject = projects.get(state.projectId);
+sliceProject.sources = structuredClone(state.sources);
+sliceProject.data.sources['workflow.png'] = {extract:{method:'grid',cols:2,rows:1},process:{scale:1}};
+state.savedData = structuredClone(sliceProject.data); state.saved = JSON.stringify(state.savedData);
+state.data.actions.unsaved = {fps:13,sprites:['workflow/000.png']};
+state.data.sources['workflow.png'].extract = {method:'boxes',boxes:[[1,1,8,8]],region_ids:['000'],next_id:2};
+state.history = [structuredClone(state.savedData)];
+mode('source','original'); await context.hooks.saveSlices();
+assert(!sliceProject.data.actions.unsaved,'Saving slices must not save a draft action');
+assert.equal(sliceProject.data.sources['workflow.png'].process.scale,1,'Saving slices must not save processing edits');
+assert.equal(state.data.sources['workflow.png'].process.scale,0.8,'Unsaved processing survives the returned snapshot');
+assert(state.data.actions.unsaved,'Unsaved actions survive the returned snapshot');
+assert.equal(sliceProject.data.sources['workflow.png'].extract.boxes[0][0],1);
+assert(dirty(),'Unrelated drafts remain visibly unsaved');
+assert.equal(state.history.length,1,'Unrelated undo history is preserved');
+const savedExtract = structuredClone(state.data.sources['workflow.png'].extract);
+state.preview = null; state.previewKey = null;
+state.data.sources['workflow.png'].extract = {method:'boxes'};
+assert.doesNotThrow(()=>mode('source','original'),'Manual fallback must render before any regions exist');
+state.data.sources['workflow.png'].extract = savedExtract;
 await showProjects();
 assert.equal(state.data,null);
 assert.equal(state.preview,null,'Returning home releases the previous preview before updating status');

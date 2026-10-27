@@ -116,6 +116,11 @@ body[data-mode=source][data-source-view=original] .view-controls label { display
 .action-navigation { display: flex; gap: 6px; padding: 8px 18px; background: #fff; border-bottom: 1px solid var(--border); }
 .action-navigation button { border-color: transparent; background: transparent; min-height: 32px; font-size: 12px; }
 .action-navigation button.active { color: var(--accent); background: var(--accent-dim); }
+.slice-tools { display:flex; align-items:center; gap:8px; padding:7px 16px; background:white; border-bottom:1px solid var(--border); flex-shrink:0; }
+.slice-tools button { min-height:32px; font-size:12px; }
+.slice-tools button.active { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
+.slice-tools span { color:var(--muted); font-size:10px; }
+@media(max-width:640px) { .slice-tools span { display:none; } }
 #inspector-content { padding: 0 20px 20px; }
 .inspector-section { padding: 18px 0; }
 .inspector-section:first-child { border-top: 0; }

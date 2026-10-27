@@ -2,6 +2,7 @@ import {clone, frames, actionSteps, reviewSteps, editFrames, defaultReviews, rec
 import {mergeDraft, resolveMerge, conflictKey} from './merge.js';
 import {clampPanel, clampTimeline, savedSize} from './layout.js';
 import {Player} from './player.js';
+import {resizeRegion, hitRegion, manualExtraction} from './slicing.js';
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -17,6 +18,9 @@ const state = {mode:'action', data:null, revision:null, token:null, assets:[], s
 let previewTimer, toastTimer, previewRequest;
 let mergeContext;
 let frameDrag = null;
+let regionDrag = null;
+let sliceTool = 'select';
+const sliceAllocations = new Map();
 const previewCache = new Map();
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
@@ -117,6 +121,7 @@ async function api(path, payload, binary = false, signal) {
 const payload = extra => ({data:state.data, revision:state.revision, asset_revision:state.assetRevision, ...extra});
 async function task(message, operation) {
   if (state.busy) return;
+  cancelRegionDrag();
   cancelFrameDrag();
   state.busy = true; $('#canvas-loading').hidden = false; $('#canvas-loading').textContent = message;
   $('#activity-state').textContent = message; $('#activity-state').hidden = false;
@@ -169,7 +174,7 @@ function change(operation, {render = true, preview = false} = {}) {
   if (render) renderAll(); else updateSaveStatus();
 }
 function setSnapshot(snapshot) {
-  cancelFrameDrag(false);
+  cancelRegionDrag(false); cancelFrameDrag(false);
   previewRequest?.controller.abort(); previewRequest = null;
   state.data = snapshot.data; state.revision = snapshot.revision; state.assets = snapshot.assets; state.sources = snapshot.sources;
   state.references = snapshot.references || []; reconcileMaterials();
@@ -224,7 +229,7 @@ async function openProject(projectId) {
   if (state.busy || (dirty() && !confirm('切换工程会放弃当前未保存的草稿。继续？'))) return;
   await task('正在打开工程…',async () => {
     const snapshot = await api('projects/' + encodeURIComponent(projectId));
-    clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
+    clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
     player.reset(); state.projectId = projectId;
     state.action = null; state.source = null; state.review = null; state.reference = null; state.selected = 0; state.clip = 0;
     state.assetSelection.clear(); state.libraryMulti = false; state.lastAsset = null;
@@ -243,7 +248,7 @@ async function openProject(projectId) {
 async function showProjects() {
   if (state.busy || (dirty() && !confirm('返回工程列表会放弃当前未保存的草稿。继续？'))) return;
   await task('正在读取工程…',async () => {
-    await listProjects(); clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
+    await listProjects(); clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
     player.reset(); state.data = null; state.saved = null; state.savedData = null; state.projectId = null;
     previewRequest?.controller.abort(); previewRequest = null;
     state.preview = null; state.previewSource = null; state.previewKey = null; state.source = null;
@@ -281,7 +286,7 @@ async function refreshExternal() {
 
 let checkingDisk = false;
 async function checkExternalChanges() {
-  if (checkingDisk || state.busy || frameDrag || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#settings-dialog').open || $('#export-dialog').open || $('#merge-dialog').open) return;
+  if (checkingDisk || state.busy || frameDrag || regionDrag || !state.projectId || document.hidden || document.body.classList.contains('project-home') || $('#project-dialog').open || $('#settings-dialog').open || $('#export-dialog').open || $('#merge-dialog').open) return;
   checkingDisk = true;
   const projectId = state.projectId;
   try {
@@ -297,7 +302,7 @@ async function checkExternalChanges() {
     else {
       const snapshot = await api('project');
       // A user may have edited or switched projects while the request was in flight.
-      if (projectId === state.projectId && !state.busy && !frameDrag && !dirty() && !$('#settings-dialog').open) { player.pause(); setSnapshot(snapshot); }
+      if (projectId === state.projectId && !state.busy && !frameDrag && !regionDrag && !dirty() && !$('#settings-dialog').open) { player.pause(); setSnapshot(snapshot); }
     }
   } catch (error) {
     if (projectId === state.projectId) showExternalChange('无法读取磁盘工程：' + error.message);
@@ -379,6 +384,7 @@ async function save() {
   });
 }
 function mode(value, sourceView = 'processed') {
+  cancelRegionDrag();
   cancelFrameDrag(false);
   $('#inspector-content').scrollTop = 0;
   if (value === 'source' && sourceView !== state.sourceView) {
@@ -386,11 +392,12 @@ function mode(value, sourceView = 'processed') {
   }
   if (value === 'source') state.sourceView = sourceView;
   state.mode = value; state.selected = 0; state.clip = 0; player.pause();
-  clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
+  clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
   if (value === 'source') schedulePreview(); renderAll();
 }
 function renderAll() {
   if (!state.data) return;
+  cancelRegionDrag(false);
   cancelFrameDrag(false);
   $('#project-name').textContent = state.data.project?.name || state.data.character;
   const actionNames = Object.keys(state.data.actions);
@@ -421,8 +428,11 @@ function renderWorkflow() {
   $('#inspector-title').textContent = {reference:'角色约定',source:slicing ? '切割设置' : '帧调整',action:'动作设置',review:'衔接设置'}[state.mode];
   $('#inspector-step').textContent = state.mode === 'source' ? slicing ? '02 / 05' : '03 / 05' : '';
   $('#timeline-title').textContent = state.mode === 'source' ? slicing ? '原帧预览 · 保留原始尺寸' : '调整预览 · 点击选择单帧' : $('#timeline-title').textContent;
-  $('#timeline-help').textContent = state.mode === 'source' ? slicing ? '拖拽新增区域 · 点击选择 · 右侧编辑范围' : '拖动当前帧调整位置 · 应用后同步到动作' : $('#timeline-help').textContent;
+  $('#timeline-help').textContent = state.mode === 'source' ? slicing ? '选择 / 移动 · 拖动边角缩放 · 方向键微移 · Esc 取消' : '拖动当前帧调整位置 · 应用后同步到动作' : $('#timeline-help').textContent;
   $('#reference-board').hidden = state.mode !== 'reference';
+  $('#slice-tools').hidden = !slicing;
+  $('#slice-select').classList.toggle('active',sliceTool === 'select');
+  $('#slice-create').classList.toggle('active',sliceTool === 'create');
   $('#action-navigation').hidden = !['action','review'].includes(state.mode);
   $('#action-edit').classList.toggle('active',state.mode === 'action');
   $('#action-review').classList.toggle('active',state.mode === 'review');
@@ -521,9 +531,10 @@ function refreshPlayer({seek = true} = {}) {
     $('#canvas-label').textContent = `${image.size.join(' × ')} · 参考图`;
   } else if (state.mode === 'source' && state.sourceView === 'original' && sourceInfo()) {
     const source = sourceInfo(); player.size = source.size;
-    const boxes = state.previewSource === state.source && state.preview ? state.preview.frames.map(f => f.box) : resolvedSource().extract.boxes || [];
+    const regions = regionFrames(), boxes = regions.map(frame => frame.box);
     player.sourceView = {url:source.url,boxes,selected:state.selected}; player.resize();
-    $('#canvas-label').textContent = `${source.size.join(' × ')} · 原始像素 · 拖拽框选可切换到手动切图`;
+    player.sourceView.ids = regions.map(frame=>frame.id);
+    $('#canvas-label').textContent = `${source.size.join(' × ')} · 原始像素 · ${sliceTool === 'create' ? '拖拽新增区域' : '拖动区域或边角直接编辑'}`;
   } else {
     $('#canvas-label').textContent = `${state.data.frame_size.join(' × ')} · 固定锚点 (${state.data.anchor.pixels.join(', ')})`;
   }
@@ -722,9 +733,50 @@ function resolvedSource() {
 }
 function sourceRules() { state.data.sources ||= {}; return state.data.sources[state.source] ||= {}; }
 function selectedSlice() { return activeSteps()[state.selected]; }
+function regionFrames() {
+  if (!state.source) return [];
+  const extract = resolvedSource().extract, prefix = state.source.replace(/\.[^.]+$/,'') + '/';
+  if (extract.method === 'boxes' && Array.isArray(extract.region_ids) && Array.isArray(extract.boxes) && extract.region_ids.length === extract.boxes.length)
+    return extract.boxes.map((box,i)=>({id:extract.region_ids[i],box:[...box],ref:prefix+extract.region_ids[i]+'.png'}));
+  return state.previewSource === state.source && state.previewKey === previewKey(state.source) && state.preview?.stage === 'extract'
+    ? state.preview.frames.map(frame=>({...frame,box:[...frame.box]})) : [];
+}
+function sliceNextId() {
+  const key = state.projectId + '/' + state.source;
+  const next = Math.max(sliceAllocations.get(key) || 0,resolvedSource().extract.next_id || 0,
+    state.savedData?.sources?.[state.source]?.extract?.next_id || 0,...regionFrames().map(frame=>Number(frame.id)+1));
+  sliceAllocations.set(key,next); return next;
+}
+function setManualRegions(regions, nextId = sliceNextId()) {
+  sourceRules().extract = manualExtraction(resolvedSource().extract,regions,nextId);
+  sliceAllocations.set(state.projectId + '/' + state.source,sourceRules().extract.next_id);
+}
+async function saveSlices() {
+  if (!state.source || state.busy || regionDrag) return;
+  await task('正在保存当前切割…',async () => {
+    if (state.previewKey !== previewKey(state.source)) await previewSource();
+    if (state.previewError || state.previewKey !== previewKey(state.source)) throw new Error('请先修正切割预览中的错误');
+    const regions = regionFrames(), available = new Set(regions.map(frame=>frame.ref));
+    const prefix = state.source.replace(/\.[^.]+$/,'') + '/';
+    const broken = Object.values(state.data.actions).flatMap(action=>action.sprites || []).filter(ref=>ref.startsWith(prefix) && !available.has(ref));
+    if (broken.length) throw new Error('区域仍被当前动作草稿引用，请先移除或替换：' + [...new Set(broken)].join('、'));
+    const keys = new Set(regions.map(frame=>frame.id));
+    if (Object.keys(resolvedSource().process.overrides || {}).some(key=>!keys.has(key))) throw new Error('被移除区域仍有单帧调整，请先重置这些帧');
+    const source = state.source, local = clone(state.data), history = state.history, future = state.future, selected = state.selected;
+    const extract = {...clone(resolvedSource().extract),next_id:sliceNextId(),
+      identities:regions.map(frame=>({file:frame.id+'.png',source_box:[...frame.box]}))};
+    const snapshot = await api('save-slices',{source,extract,revision:state.revision,asset_revision:state.assetRevision});
+    setSnapshot(snapshot);
+    local.sources ||= {}; local.sources[source] ||= {};
+    local.sources[source].extract = clone(snapshot.data.sources[source].extract);
+    state.data = local; state.history = history; state.future = future; state.selected = selected;
+    renderAll(); schedulePreview();
+    toast(dirty() ? '当前切割已保存，其他修改仍保留在草稿中' : '当前切割与原始切片已保存');
+  });
+}
 function sourceInspector() {
   if (!state.source) return '<div class="inspector-empty"><h3>从一张原图开始</h3><p>点击左上角 ＋ 导入动作原图，再选择自动识别、网格或手动框选。</p></div>';
-  const {extract,process} = resolvedSource(), slice = selectedSlice();
+  const {extract,process} = resolvedSource(), slice = state.sourceView === 'original' ? regionFrames()[state.selected] : selectedSlice();
   const override = process.overrides?.[slice?.id] || {};
   const error = state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '';
   if (state.sourceView === 'original') {
@@ -734,10 +786,10 @@ function sourceInspector() {
     return error + section('切割方式',label('识别方式',`<select id="extract-method">${methods.map(([value,name]) => `<option value="${value}" ${value === method ? 'selected' : ''}>${name}</option>`).join('')}</select>`) +
       (['grid','components'].includes(method) ? `<div class="field-row">${label('列数',number('extract-cols',extract.cols ?? '', 'min="1" placeholder="自动"'))}${label('行数',number('extract-rows',extract.rows ?? '', 'min="1" placeholder="自动"'))}</div>` : '') +
       (method === 'components' ? `<details><summary>识别参数</summary>${label('透明度阈值',number('extract-alpha',extract.alpha_threshold || 16,'min="1" max="255"'))}${label('最小组件像素',number('extract-min',extract.min_component_pixels || 80,'min="1"'))}${label('主体最少像素',number('extract-major',extract.major_min_pixels || 10000,'min="1"'))}${label('主体占比',number('extract-fraction',extract.major_fraction ?? .02,'min="0" max="1" step="0.01"'))}</details>` : '') + '<button id="detect-slices" class="wide">重新预览切割</button>') +
-      section(`所选区域 ${String(state.selected + 1).padStart(2,'0')}`,box ? `<div class="field-row">${label('X',number('slice-x',box[0],'min="0"'))}${label('Y',number('slice-y',box[1],'min="0"'))}</div><div class="field-row">${label('宽度',number('slice-width',box[2]-box[0],'min="1"'))}${label('高度',number('slice-height',box[3]-box[1],'min="1"'))}</div><p class="hint">修改范围会切换为手动区域。坐标使用原图像素。</p><button id="remove-box" class="wide danger">移除此区域</button>` : '<p class="hint">预览后选择一帧，或在原图上拖拽新增区域。</p>') +
+      section(`所选区域 ${String(state.selected + 1).padStart(2,'0')} · ID ${escape(slice?.id || '—')}`,box ? `<div class="field-row">${label('X',number('slice-x',box[0],'min="0"'))}${label('Y',number('slice-y',box[1],'min="0"'))}</div><div class="field-row">${label('宽度',number('slice-width',box[2]-box[0],'min="1"'))}${label('高度',number('slice-height',box[3]-box[1],'min="1"'))}</div><p class="hint">修改范围会切换为手动区域。坐标使用原图像素。</p><button id="remove-box" class="wide danger">移除此区域</button>` : '<p class="hint">预览后选择一帧，或在原图上拖拽新增区域。</p>') +
       section('原帧',info('原图尺寸',sourceInfo().size.join(' × ')) + '<p class="hint">保留原始尺寸与透明像素。此处只切割，不缩放或对齐。</p>') +
       `<details class="advanced-rules"><summary>高级切割规则</summary><textarea id="extract-json" rows="6">${escape(JSON.stringify(extract,null,2))}</textarea><button id="apply-extract-json" class="wide">更新切割规则</button></details>` +
-      '<div class="inspector-next"><button id="save-slices" class="wide">保存工程草稿</button><button id="view-processed" class="primary wide">下一步：调整帧 →</button><p class="hint">保存当前工程参数，不改写已处理图片。</p></div>';
+      '<div class="inspector-next"><button id="save-slices" class="wide">保存当前切割</button><button id="view-processed" class="primary wide">下一步：调整帧 →</button><p class="hint">仅保存当前原图的切割与原始切片；其他草稿保持未保存。</p></div>';
   }
   return error + section('单帧微调',slice ? `<span class="selected-ref">${escape(slice.ref)}</span><div class="field-row">${label('水平偏移',number('override-x',override.offset?.[0] ?? process.offset?.[0] ?? 0,'step="1"'))}${label('垂直偏移',number('override-y',override.offset?.[1] ?? process.offset?.[1] ?? 0,'step="1"'))}</div>` +
       label('独立缩放倍率',number('override-scale',override.scale ?? '', 'min="0.01" max="10" step="0.01" placeholder="继承整组"')) + '<p class="hint">可直接拖动画面中的当前帧。单帧设置覆盖整组值；留空缩放可继承整组。</p><button id="clear-override" class="wide">重置本帧</button>' : '<p class="hint">正在准备预览。选择下方原帧后可单独调整。</p>') +
@@ -757,14 +809,17 @@ function bindSourceInspector() {
   $('#view-original')?.addEventListener('click',() => mode('source','original'));
   $('#view-processed')?.addEventListener('click',() => mode('source','processed'));
   $('#detect-slices')?.addEventListener('click',() => previewSource(true));
-  $('#save-slices')?.addEventListener('click',save);
+  $('#save-slices')?.addEventListener('click',saveSlices);
   $('#next-actions')?.addEventListener('click',() => mode('action'));
   bindValue('extract-method', value => {
-    setExtract('method',value);
-    if (value === 'boxes') {
-      setExtract('boxes',state.preview?.frames.map(frame => frame.box) || resolvedSource().extract.boxes || []); state.sourceView = 'original';
-    }
-    if (value === 'grid') { setExtract('cols',resolvedSource().extract.cols || 1); setExtract('rows',resolvedSource().extract.rows || 1); }
+    const regions = regionFrames(), nextId = sliceNextId();
+    if (value === 'boxes' && regions.length) { setManualRegions(regions,nextId); return; }
+    const extract = {...resolvedSource().extract,method:value,next_id:nextId};
+    delete extract.region_ids;
+    if (value === 'boxes') { extract.boxes = []; extract.region_ids = []; }
+    if (regions.length) extract.identities = regions.map(frame=>({file:frame.id+'.png',source_box:frame.box}));
+    if (value === 'grid') { extract.cols ||= 1; extract.rows ||= 1; }
+    sourceRules().extract = extract;
   },opts);
   const setLayout = (key,value) => {
     setExtract(key,value);
@@ -781,21 +836,15 @@ function bindSourceInspector() {
     try { const rules = JSON.parse($('#process-json').value); if (!rules || Array.isArray(rules) || typeof rules !== 'object') throw new Error(); change(() => { sourceRules().process = rules; },opts); }
     catch { toast('处理规则必须是有效的 JSON 对象',true); }
   };
-  const currentBoxes = () => (state.preview?.frames.map(frame => frame.box) || resolvedSource().extract.boxes || []).map(box => [...box]);
-  const setBoxes = boxes => { setExtract('method','boxes'); setExtract('boxes',boxes); };
   ['x','y','width','height'].forEach(key => bindValue('slice-' + key,value => {
-    const boxes = currentBoxes(), box = boxes[state.selected]; if (!box || value === null) return;
-    const [x,y,right,bottom] = box;
+    const regions = regionFrames(), frame = regions[state.selected]; if (!frame || value === null) return;
+    const [x,y,right,bottom] = frame.box;
     const next = key === 'x' ? [value,y,value+right-x,bottom] : key === 'y' ? [x,value,right,value+bottom-y] : key === 'width' ? [x,y,x+value,bottom] : [x,y,right,y+value];
     const [width,height] = sourceInfo().size;
     if (next[2] > width || next[3] > height) { toast('区域不能超出原图边界',true); return; }
-    boxes[state.selected] = next; setBoxes(boxes);
+    frame.box = next; setManualRegions(regions);
   },opts));
-  $('#remove-box')?.addEventListener('click', () => {
-    const boxes = currentBoxes();
-    if (boxes.length <= 1) { toast('至少保留一个区域；可调整范围或删除整张原图',true); return; }
-    change(() => { boxes.splice(state.selected,1); setBoxes(boxes); state.selected = Math.max(0,state.selected - 1); },opts);
-  });
+  $('#remove-box')?.addEventListener('click',removeRegion);
   [['process-mode','mode'],['process-scale','scale'],['process-height','fit_height'],['process-max-scale','max_scale'],['process-clamp','clamp_y'],['process-padding','padding'],['process-overflow','overflow']].forEach(([id,key]) => bindValue(id,value => setProcess(key,value),opts));
   ['x','y'].forEach((axis,index) => bindValue('process-' + axis,value => { const offset = [...(resolvedSource().process.offset || [0,0])]; offset[index] = value; setProcess('offset',offset); },opts));
   const setOverride = (key,value) => {
@@ -822,7 +871,10 @@ function previewKey(source) {
     state.data.sources?.[source]]);
 }
 function showPreview(result, source, key) {
+  const selectedId = state.sourceView === 'original' ? regionFrames()[state.selected]?.id : null;
+  sliceAllocations.set(state.projectId + '/' + source,Math.max(sliceAllocations.get(state.projectId + '/' + source) || 0,result.next_id || 0));
   state.preview = result; state.previewSource = source; state.previewKey = key; state.previewError = null; state.previewOffsets = {};
+  if (selectedId && result.frames.some(frame=>frame.id === selectedId)) state.selected = result.frames.findIndex(frame=>frame.id === selectedId);
   state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
   if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus(); }
   $('#status-message').textContent = result.stage === 'extract' ? `切割预览：${result.frames.length} 帧 · 原始尺寸 · 未改写素材` : `调整预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
@@ -969,38 +1021,83 @@ for (const type of ['pointercancel','lostpointercapture']) $('#stage').addEventL
   if (event.pointerId === frameDrag?.pointerId) cancelFrameDrag();
 });
 
-// In original-image mode the drag rectangle is authored in source pixels.
-let rectangleStart;
-const sourcePoint = event => {
-  const rect = $('#stage').getBoundingClientRect();
-  return [Math.max(0,Math.min(player.size[0],Math.round((event.clientX - rect.left) / rect.width * player.size[0]))),
-          Math.max(0,Math.min(player.size[1],Math.round((event.clientY - rect.top) / rect.height * player.size[1])))];
-};
-$('#stage').addEventListener('pointerdown', event => {
-  if (event.button !== 0 || state.mode !== 'source' || !player.sourceView || state.busy) return;
-  rectangleStart = sourcePoint(event); $('#stage').setPointerCapture(event.pointerId);
-});
-$('#stage').addEventListener('pointermove', event => {
-  if (!rectangleStart || !player.sourceView) return;
-  const end = sourcePoint(event), [x,y] = rectangleStart;
-  player.sourceView.draftBox = [Math.min(x,end[0]),Math.min(y,end[1]),Math.max(x,end[0]),Math.max(y,end[1])]; player.draw();
-});
-$('#stage').addEventListener('pointerup', event => {
-  if (!rectangleStart) return;
-  const end = sourcePoint(event), [x,y] = rectangleStart; rectangleStart = null;
-  const box = [Math.min(x,end[0]),Math.min(y,end[1]),Math.max(x,end[0]),Math.max(y,end[1])];
-  if (box[2] - box[0] < 3 || box[3] - box[1] < 3) {
-    const found = player.sourceView?.boxes.findIndex(([a,b,c,d]) => a <= x && x <= c && b <= y && y <= d);
-    if (found >= 0) { state.selected = found; renderAll(); } else { if (player.sourceView) delete player.sourceView.draftBox; player.draw(); }
-    return;
+// Region gestures stay in source pixels and commit one undo step on release.
+function sourcePoint(event) {
+  const stage=$('#stage'), rect=stage.getBoundingClientRect();
+  const ratio=[player.size[0]/(rect.width-2*stage.clientLeft),player.size[1]/(rect.height-2*stage.clientTop)];
+  return {point:[Math.max(0,Math.min(player.size[0],Math.round((event.clientX-rect.left-stage.clientLeft)*ratio[0]))),
+    Math.max(0,Math.min(player.size[1],Math.round((event.clientY-rect.top-stage.clientTop)*ratio[1])))],ratio};
+}
+function cancelRegionDrag(redraw = true) {
+  if (!regionDrag) return;
+  const drag=regionDrag; regionDrag=null;
+  const stage=$('#stage');
+  if (stage.hasPointerCapture(drag.pointerId)) stage.releasePointerCapture(drag.pointerId);
+  if (player.sourceView) { player.sourceView.boxes=drag.regions.map(frame=>[...frame.box]); delete player.sourceView.draftBox; }
+  if (redraw && state.data) { renderInspector(); player.draw(); }
+  if (state.data && state.mode === 'source' && state.previewKey !== previewKey(state.source)) schedulePreview();
+}
+function removeRegion() {
+  const regions=regionFrames(), frame=regions[state.selected]; if (!frame) return;
+  if (regions.length<=1) { toast('至少保留一个区域；也可删除整张原图',true); return; }
+  const used=Object.entries(state.data.actions).filter(([,action])=>(action.sprites || []).includes(frame.ref)).map(([name])=>name);
+  if (used.length) { toast('此区域被动作引用：' + used.join('、') + '。请先移除或替换引用。',true); return; }
+  if (resolvedSource().process.overrides?.[frame.id]) { toast('此区域仍有单帧调整，请先在调整页重置',true); return; }
+  const nextId=sliceNextId();
+  change(()=>{ regions.splice(state.selected,1); setManualRegions(regions,nextId); state.selected=Math.min(state.selected,regions.length-1); },{preview:true});
+}
+function moveRegionDrag(event) {
+  const drag=regionDrag; if (!drag || event.pointerId!==drag.pointerId) return;
+  const {point}=sourcePoint(event), [x,y]=drag.start;
+  drag.box=drag.handle === 'create' ? [Math.min(x,point[0]),Math.min(y,point[1]),Math.max(x,point[0]),Math.max(y,point[1])]
+    : resizeRegion(drag.regions[drag.index].box,drag.handle,[point[0]-x,point[1]-y],player.size);
+  if (drag.handle==='create') player.sourceView.draftBox=drag.box;
+  else {
+    player.sourceView.boxes=drag.regions.map((frame,i)=>i===drag.index ? drag.box : frame.box);
+    const values={x:drag.box[0],y:drag.box[1],width:drag.box[2]-drag.box[0],height:drag.box[3]-drag.box[1]};
+    for (const [key,value] of Object.entries(values)) { const input=$('#slice-'+key); if (input) input.value=value; }
   }
-  change(() => {
-    const current = resolvedSource().extract, rules = sourceRules();
-    rules.extract = {...current,method:'boxes',boxes:[...(state.preview?.frames.map(frame => frame.box) || current.boxes || []),box]};
-    state.selected = rules.extract.boxes.length - 1;
-  },{preview:true});
+  player.draw();
+}
+$('#stage').addEventListener('pointerdown', event=>{
+  if (event.button!==0 || state.mode!=='source' || state.sourceView!=='original' || state.busy || !player.sourceView) return;
+  const regions=regionFrames(), {point,ratio}=sourcePoint(event);
+  if (!regions.length && resolvedSource().extract.method !== 'boxes') { toast('请等待切割预览，或先选择手动区域',true); return; }
+  const hit=sliceTool==='create' ? {index:regions.length,handle:'create'} : hitRegion(regions.map(frame=>frame.box),state.selected,point,6*Math.max(...ratio));
+  if (!hit) return;
+  event.preventDefault(); player.pause(); $('#stage').focus();
+  clearTimeout(previewTimer); state.previewEpoch++; previewRequest?.controller.abort(); previewRequest=null;
+  if (hit.handle!=='create') { state.selected=hit.index; player.sourceView.selected=hit.index; renderInspector(); renderTimeline(); }
+  regionDrag={pointerId:event.pointerId,start:point,regions,index:hit.index,handle:hit.handle,box:null};
+  $('#stage').setPointerCapture(event.pointerId); player.draw();
 });
-$('#stage').addEventListener('pointercancel', () => { rectangleStart = null; if (player.sourceView) delete player.sourceView.draftBox; player.draw(); });
+$('#stage').addEventListener('pointermove',event=>{
+  if (regionDrag) { moveRegionDrag(event); return; }
+  if (state.mode!=='source' || state.sourceView!=='original' || !player.sourceView) return;
+  const {point,ratio}=sourcePoint(event), hit=hitRegion(regionFrames().map(frame=>frame.box),state.selected,point,6*Math.max(...ratio));
+  $('#stage').style.cursor=sliceTool==='create' ? 'crosshair' : hit ? hit.handle==='move' ? 'move' : hit.handle+'-resize' : 'default';
+});
+$('#stage').addEventListener('pointerup',event=>{
+  if (!regionDrag || event.pointerId!==regionDrag.pointerId) return;
+  moveRegionDrag(event);
+  const drag=regionDrag; regionDrag=null;
+  if ($('#stage').hasPointerCapture(event.pointerId)) $('#stage').releasePointerCapture(event.pointerId);
+  delete player.sourceView.draftBox;
+  const regions=drag.regions;
+  if (drag.handle==='create') {
+    if (drag.box[2]-drag.box[0]<3 || drag.box[3]-drag.box[1]<3) { player.draw(); if (state.previewKey !== previewKey(state.source)) schedulePreview(); return; }
+    const next=sliceNextId(); regions.push({id:String(next).padStart(3,'0'),box:drag.box});
+    change(()=>{ setManualRegions(regions,next+1); state.selected=regions.length-1; },{preview:true});
+  } else if (JSON.stringify(drag.box)!==JSON.stringify(regions[drag.index].box)) {
+    regions[drag.index].box=drag.box;
+    change(()=>setManualRegions(regions),{preview:true});
+  } else { renderInspector(); player.draw(); if (state.previewKey !== previewKey(state.source)) schedulePreview(); }
+});
+for (const type of ['pointercancel','lostpointercapture']) $('#stage').addEventListener(type,event=>{
+  if (regionDrag?.pointerId===event.pointerId) cancelRegionDrag();
+});
+$('#slice-select').onclick=()=>{ cancelRegionDrag(); sliceTool='select'; renderAll(); };
+$('#slice-create').onclick=()=>{ cancelRegionDrag(); sliceTool='create'; renderAll(); };
 
 document.querySelectorAll('button[data-mode]').forEach(button => { button.onclick = () => mode(button.dataset.mode,button.dataset.view); });
 $('#action-edit').onclick = () => mode('action');
@@ -1120,7 +1217,7 @@ $('#reload').onclick = () => {
   task('正在重新载入…',loadProject);
 };
 function restoreHistory(redo) {
-  cancelFrameDrag(false);
+  cancelRegionDrag(); cancelFrameDrag(false);
   const source = redo ? state.future : state.history, target = redo ? state.history : state.future;
   if (!source.length || state.busy) return;
   target.push(clone(state.data)); state.data = source.pop(); state.previewEpoch++; state.preview = null;
@@ -1261,6 +1358,10 @@ $('#export-form').onsubmit = async event => {
 
 document.addEventListener('keydown', event => {
   if (!state.data || state.busy || event.defaultPrevented || $('#project-dialog').open) return;
+  if (regionDrag) {
+    if (event.key === 'Escape') { event.preventDefault(); cancelRegionDrag(); }
+    return;
+  }
   if (frameDrag) {
     if (event.key === 'Escape') { event.preventDefault(); cancelFrameDrag(); }
     return;
@@ -1268,6 +1369,15 @@ document.addEventListener('keydown', event => {
   const editable = ['INPUT','TEXTAREA','SELECT','BUTTON'].includes(document.activeElement?.tagName);
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!$('#export-dialog').open) save(); return; }
   if (editable || $('#export-dialog').open) return;
+  if (state.mode === 'source' && state.sourceView === 'original' && !event.ctrlKey && !event.metaKey) {
+    if (event.key === 'Delete') { event.preventDefault(); removeRegion(); return; }
+    const direction = {ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];
+    if (direction) {
+      event.preventDefault(); const regions = regionFrames(), frame = regions[state.selected]; if (!frame) return;
+      const delta = direction.map(v=>v*(event.shiftKey ? 10 : 1));
+      change(()=>{ frame.box = resizeRegion(frame.box,'move',delta,sourceInfo().size); setManualRegions(regions); },{preview:true}); return;
+    }
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); restoreHistory(event.shiftKey); }
   else if (event.code === 'Space') { event.preventDefault(); if (!$('#play').disabled) $('#play').click(); }
   else if (event.key === 'ArrowLeft') { event.preventDefault(); singleStep(-1); }

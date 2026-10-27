@@ -28,12 +28,14 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("--anchor-x", type=float, default=.5)
     create.add_argument("--anchor-y", type=float, default=.9)
     commands.add_parser("list")
-    for name in ("status", "validate", "apply", "prepare", "save", "import", "delete", "export", "qa"):
+    for name in ("status", "validate", "apply", "save-slices", "prepare", "save", "import", "delete", "export", "qa"):
         command = commands.add_parser(name)
         command.add_argument("project")
-        if name == "apply":
+        if name in {"apply", "save-slices"}:
             command.add_argument("--source", required=True)
-        if name in {"apply", "prepare", "import", "delete"}:
+        if name == 'save-slices':
+            command.add_argument('--extract', type=Path, help='Extraction rules JSON; defaults to saved rules')
+        if name in {"apply", "save-slices", "prepare", "import", "delete"}:
             command.add_argument("--revision", help="Expected config revision, if already inspected")
             command.add_argument("--asset-revision", help="Expected material revision, if already inspected")
         if name == "save":
@@ -143,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
                     assets = args.asset_revision or project.changes()["asset_revision"]
                     if args.command == "apply":
                         result = project.apply(cfg.data, revision, args.source, assets)
+                    elif args.command == 'save-slices':
+                        extract = json.loads(args.extract.read_text(encoding='utf-8')) if args.extract else cfg.source_spec(args.source)['extract']
+                        result = project.save_slices(args.source, extract, revision, assets)
                     elif args.command == "prepare":
                         result = project.prepare(cfg.data, revision, assets)
                     elif args.command == "delete":

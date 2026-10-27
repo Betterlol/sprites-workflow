@@ -23,7 +23,8 @@ from PIL import Image
 from .animation import playback
 from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_data, inside, integer, load_config, source_fingerprint
 from .export import pack_action, preview_action, preview_gif, update_manifest
-from .extract import cut_frames, preserve_slice_ids, previous_slices
+from .extract import cut_frames, preserve_slice_ids, previous_slices, slice_ids
+from .slices import read_slices, write_slices
 from .files import numbered_frames, read_image, replace_frames, write_json
 from .history import HistoryConflictError, OperationNotStarted, ProjectHistory
 from .process import process_images
@@ -180,7 +181,7 @@ class Project:
 
     def asset_revision(self, cfg: Config) -> str:
         digest = hashlib.sha256()
-        for kind, root in (("source", cfg.source), ("processed", cfg.directory("processed_sprites")),
+        for kind, root in (("source", cfg.source), ("slices", cfg.directory("source_sprites")), ("processed", cfg.directory("processed_sprites")),
                            ("final", cfg.directory("sprites")),
                            *((name, self.reference_root(name)) for name in REFERENCE_DIRS)):
             for path in sorted(root.rglob("*")):
@@ -203,6 +204,11 @@ class Project:
     def draft(self, data: dict) -> Config:
         current = load_config(self.path)
         cfg = config_from_data(data, self.path)
+        for filename, settings in cfg.data.get('sources', {}).items():
+            minimum = current.source_spec(filename)['extract'].get('next_id', 0)
+            if minimum:
+                extraction = settings.setdefault('extract', {})
+                extraction['next_id'] = max(minimum, extraction.get('next_id', 0))
         if cfg.data.get("paths") != current.data.get("paths"):
             raise ValueError("The editor cannot change project paths; open another project with --config")
         if cfg.character != current.character:
@@ -309,23 +315,68 @@ class Project:
     def fingerprint(self, cfg: Config, filename: str) -> str:
         return source_fingerprint(cfg, filename)
 
+    def save_slices(self, filename: str, extract: dict, revision: str, asset_revision: str | None = None) -> dict:
+        """Commit only one extraction recipe and its native slices, preserving other edits."""
+        with self.lock:
+            self.check_revision(revision)
+            self.check_assets(asset_revision)
+            current = load_config(self.path)
+            baseline_assets = self.asset_revision(current)
+            data = copy.deepcopy(current.data)
+            settings = data.setdefault('sources', {}).setdefault(filename, {})
+            settings['extract'] = copy.deepcopy(extract)
+            previous = previous_slices(current, filename)
+            old_ids = {Path(item['file']).stem for item in previous}
+            minimum = max(current.source_spec(filename)['extract'].get('next_id', 0),
+                          max([int(key) for key in old_ids] + [-1]) + 1)
+            settings['extract']['next_id'] = max(minimum, settings['extract'].get('next_id', 0))
+            cfg, images, _, descriptors, _ = self.render(data, filename, 'extract')
+            keys = set(images)
+            prefix = cfg.source_id(filename) + '/'
+            available = {prefix + item['file'] for item in descriptors}
+            broken = {ref for name in current.data['actions'] for ref in (current.action(name).get('sprites') or [])
+                      if ref.startswith(prefix) and ref not in available}
+            if broken:
+                raise ValueError('区域仍被已保存动作使用，请先保存动作中的移除或替换：' + ', '.join(sorted(broken)))
+            unused_overrides = set(current.source_spec(filename)['process'].get('overrides', {})) - keys
+            if unused_overrides:
+                raise ValueError('区域仍有已保存的单帧调整，请先重置并保存这些帧：' + ', '.join(sorted(unused_overrides)))
+            rules = cfg.data['sources'][filename]['extract']
+            rules['identities'] = descriptors
+            rules['next_id'] = max(rules['next_id'], max(map(int, keys), default=-1) + 1)
+            if rules.get('method') == 'boxes':
+                rules['region_ids'] = list(images)
+            directory = inside(cfg.directory('source_sprites'), cfg.source_id(filename))
+            self.check_revision(revision)
+            self.check_assets(baseline_assets)
+            with self.history_transaction('save slices', [self.path, directory]):
+                write_slices(cfg, filename, images, descriptors)
+                write_json(self.path, cfg.data)
+            return self.state()
+
     def render(self, data: dict, filename: str, stage: str = "process") -> tuple[Config, dict, dict, list, float]:
         if stage not in {"extract", "process"}:
             raise ValueError("Unknown preview stage")
         cfg = self.draft(data)
         if filename not in cfg.discover_sources():
             raise ValueError("Unknown source image")
-        raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
-        keys = preserve_slice_ids(boxes, previous_slices(cfg, filename))
-        images = dict(zip(keys, raw))
+        cached = read_slices(cfg, filename)
+        if cached is None:
+            raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
+            keys = slice_ids(cfg, filename, boxes)
+            images = dict(zip(keys, raw))
+            descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
+        else:
+            images, descriptors = cached
         frames, scale = ({f"{key}.png": image for key, image in images.items()}, 1.0) if stage == "extract" else process_images(cfg, filename, images)
-        descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
         return cfg, images, frames, descriptors, scale
 
     def preview(self, data: dict, filename: str, stage: str = "process") -> dict:
         with self.lock:
             cfg, _raw, frames, descriptors, scale = self.render(data, filename, stage)
-            return {"stage": stage, "scale": scale, "frames": [
+            return {"stage": stage, "scale": scale,
+                "next_id": max(cfg.source_spec(filename)['extract'].get('next_id', 0), max(map(int, _raw), default=-1) + 1),
+                "frames": [
                 {"id": Path(item["file"]).stem, "ref": cfg.source_id(filename) + "/" + item["file"],
                  "box": item["source_box"], "url": data_url(frames[item["file"]]),
                  "bbox": frames[item["file"]].getbbox()}

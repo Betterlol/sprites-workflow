@@ -73,10 +73,11 @@
     <section id="canvas-pane" class="editor" tabindex="-1">
       <div id="reference-board" class="reference-board" hidden></div>
       <div id="action-navigation" class="action-navigation" hidden><button id="action-edit">动作编排</button><button id="action-review">衔接检查</button></div>
+      <div id="slice-tools" class="slice-tools" hidden><button id="slice-select" class="active" title="选中区域后可直接移动，拖动边角调整大小">选择 / 移动</button><button id="slice-create" title="在原图上拖拽创建新区域">＋ 新建区域</button><span>拖动边角缩放 · Shift + 方向键移动 10 px</span></div>
       <div class="canvas-toolbar"><div><span class="eyebrow" id="editor-kind">ACTION EDITOR</span><strong id="editor-title">—</strong></div><div class="view-controls"><label><input id="guides" type="checkbox" checked> 辅助线</label><label><input id="onion" type="checkbox"> 前帧叠图</label><label><input id="reference" type="checkbox"> Idle 参考</label><select id="background" aria-label="画布背景"><option value="checker">棋盘格</option><option value="dark">深色</option><option value="light">浅色</option></select><select id="zoom" aria-label="画布缩放"><option value="fit">适应画布</option><option value="1">100%</option><option value="0.5">50%</option><option value="2">200%</option></select></div></div>
       <div id="canvas-area" class="canvas-area">
         <span class="canvas-label" id="canvas-label">统一画布 · 固定锚点</span>
-        <canvas id="stage" width="640" height="640" aria-label="Sprite 预览画布"></canvas>
+        <canvas id="stage" width="640" height="640" tabindex="0" aria-label="Sprite 预览画布"></canvas>
         <div id="empty-canvas" class="empty-canvas" hidden><span>＋</span><strong>从素材开始，编排动作</strong><p>点击左侧素材，或将它拖入下方时间轴</p></div>
         <div id="frame-info" class="frame-info">—</div>
         <div id="canvas-loading" class="canvas-loading" hidden>正在处理…</div>

@@ -12,6 +12,7 @@ import threading
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -111,6 +112,126 @@ class WorkbenchTests(unittest.TestCase):
 
     def test_preview_rejects_unknown_stage(self):
         self.assertEqual(self.post('preview', source='walk.png', stage='unknown').status_code, 400)
+
+    def save_slices(self, extract=None):
+        return self.post('save-slices', source='walk.png', extract=extract or self.data['sources']['walk.png']['extract'])
+
+    def test_slicing_save_is_scoped_and_does_not_process(self):
+        original = json.loads(self.path.read_text())
+        self.data['actions']['walk']['fps'] = 25
+        self.data['sources']['walk.png']['process'] = {'scale': 1000}
+        with patch('sprite_pipeline.workbench.process_images', side_effect=AssertionError('must not process')):
+            response = self.save_slices()
+        self.assertEqual(response.status_code, 200, response.text)
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved['actions'], original['actions'])
+        self.assertNotIn('process', saved['sources']['walk.png'])
+        self.assertFalse((self.root / 'processed_sprites').exists())
+        with Image.open(self.root / 'source_sprites/walk/000.png') as native:
+            self.assertEqual(native.size, (8, 8))
+        self.assertEqual(saved['sources']['walk.png']['extract']['next_id'], 3)
+
+    def test_saved_slices_are_reused_for_processing_changes(self):
+        response = self.save_slices()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        self.data['sources']['walk.png']['process'] = {'offset': [1, -2]}
+        with patch('sprite_pipeline.workbench.cut_frames', side_effect=AssertionError('unexpected recut')):
+            response = self.post('preview', source='walk.png')
+            self.assertEqual(response.status_code, 200, response.text)
+            response = self.post('apply', source='walk.png')
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(Image.open(self.root / 'processed_sprites/walk/000.png').getbbox(), (5, 4, 13, 12))
+
+    def test_manual_ids_survive_large_moves_and_reordering(self):
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        rules = {'method':'boxes', 'boxes':[[0,0,8,8],[16,0,24,8],[8,0,16,8]], 'region_ids':['002','000','001'], 'next_id':3}
+        response = self.save_slices(rules)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(Image.open(self.root / 'source_sprites/walk/000.png').convert('RGBA').getpixel((0,0)), (0,0,255,255))
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        result = self.post('preview', source='walk.png', stage='extract').json()
+        self.assertEqual([f['id'] for f in result['frames']], ['002','000','001'])
+
+    def test_slice_deletion_protects_saved_references_even_if_draft_removed_them(self):
+        original = self.path.read_bytes()
+        self.data['actions'] = {}
+        response = self.save_slices({'method':'boxes','boxes':[[0,0,8,8]],'region_ids':['000'],'next_id':3})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('walk/001.png', response.text)
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_slicing_save_checks_revision_and_rolls_back_cache(self):
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.save_slices().status_code, 409)
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        before = {p.relative_to(self.root):p.read_bytes() for p in self.root.rglob('*') if p.is_file() and '.sprite-workbench-history' not in p.parts}
+        with patch('sprite_pipeline.workbench.write_json', side_effect=OSError('failed config')):
+            self.assertNotEqual(self.save_slices().status_code, 200)
+        after = {p.relative_to(self.root):p.read_bytes() for p in self.root.rglob('*') if p.is_file() and '.sprite-workbench-history' not in p.parts}
+        self.assertEqual(after, before)
+
+    def test_corrupt_or_changed_slices_do_not_reuse_invalid_pixels(self):
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        (self.root / 'source_sprites/walk/000.png').write_bytes(b'broken')
+        response = self.post('preview', source='walk.png', stage='extract')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((self.root / 'source_sprites/walk/000.png').read_bytes(), b'broken', 'Preview must not rewrite caches')
+        sheet = Image.new('RGBA',(24,8),'yellow'); sheet.save(self.root / 'source/walk.png')
+        result = self.post('preview', source='walk.png', stage='extract').json()
+        image = Image.open(io.BytesIO(base64.b64decode(result['frames'][0]['url'].split(',',1)[1])))
+        self.assertEqual(image.convert('RGBA').getpixel((0,0)), (255,255,0,255))
+
+    def test_deleted_highest_id_is_not_reallocated(self):
+        self.data['actions'] = {}; self.path.write_text(json.dumps(self.data))
+        self.revision = self.app.state.project.revision
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        response = self.save_slices({'method':'boxes','boxes':[[0,0,8,8],[8,0,16,8]],'region_ids':['000','001']})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['data']['sources']['walk.png']['extract']['next_id'], 3)
+        self.data = response.json()['data']
+        self.data['sources']['walk.png']['extract'].pop('region_ids')
+        self.data['sources']['walk.png']['extract']['boxes'].append([16,0,24,8])
+        result = self.post('preview', source='walk.png', stage='extract').json()
+        self.assertEqual([f['id'] for f in result['frames']], ['000','001','003'])
+
+    def test_cache_inventory_cannot_change_saved_frame_order(self):
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']
+        path = self.root / 'source_sprites/walk/_stage.json'
+        inventory = json.loads(path.read_text())
+        inventory['frames'].reverse(); inventory['files'].reverse()
+        path.write_text(json.dumps(inventory))
+        result = self.post('preview', source='walk.png', stage='extract').json()
+        self.assertEqual([frame['id'] for frame in result['frames']], ['000','001','002'])
+
+    def test_changed_extraction_rules_invalidate_saved_slices(self):
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']
+        self.data['sources']['walk.png']['extract'].update(method='boxes',boxes=[[1,0,8,8]],region_ids=['000'])
+        result = self.post('preview', source='walk.png', stage='extract').json()
+        self.assertEqual(len(result['frames']), 1)
+        self.assertEqual(result['frames'][0]['box'], [1,0,8,8])
+
+    def test_saved_watermark_cannot_be_rewound_by_old_whole_project_draft(self):
+        response = self.save_slices(); self.assertEqual(response.status_code, 200, response.text)
+        self.data = response.json()['data']; self.revision = response.json()['revision']
+        del self.data['sources']['walk.png']['extract']['next_id']
+        self.assertEqual(self.post('save').status_code, 200)
+        self.assertEqual(json.loads(self.path.read_text())['sources']['walk.png']['extract']['next_id'],3)
+
+    def test_first_save_keeps_preview_ids_with_allocation_watermark(self):
+        preview = self.post('preview', source='walk.png', stage='extract').json()
+        extract = dict(self.data['sources']['walk.png']['extract'])
+        extract['next_id'] = preview['next_id']
+        extract['identities'] = [{'file':frame['id']+'.png','source_box':frame['box']} for frame in preview['frames']]
+        response = self.save_slices(extract)
+        self.assertEqual(response.status_code, 200, response.text)
+        identities = response.json()['data']['sources']['walk.png']['extract']['identities']
+        self.assertEqual([item['file'] for item in identities],['000.png','001.png','002.png'])
 
     def test_apply_persists_recipe_and_only_processed_images(self):
         snapshot = self.apply()

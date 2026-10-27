@@ -19,14 +19,14 @@ Agent 必须先读 [AGENTS.md](AGENTS.md)、[工作区说明](workspaces/README.
 
 `tools/serve_sprites.py` 启动同源的本地 FastAPI 服务与浏览器界面。前端使用原生 ES modules 和 Canvas 2D，无前端构建依赖。分阶段 CLI 继续保留；Agent 常规操作优先使用 `tools/projects.py`，避免绕过共享保护。
 
-网页工作流为：原图 → 内存切图 / 参数预览 → 明确应用到 processed → 动作引用与 Review 编排 → 按需导出。
+网页工作流为：原图 → 切割预览 / 区域直接编辑 → 独立保存切割与原尺寸切片 → 参数预览并明确应用到 processed → 动作引用与 Review 编排 → 按需导出。
 
 - `pipeline.json` 由人、Agent、CLI 共用，网页只在显式提交时回写，以文件摘要检测外部修改并保护未保存草稿。
 - 动作保存 `actions.*.sprites` 引用，不持久化复制另一套最终帧。运行时顺序 / FPS 与 `animation` 展示顺序 / 逐步时长独立；视觉验收以运行时参数为准。
 - Review 保存在 `workbench.reviews`，引用动作、片段范围和有界重复次数，不继承动作的无限循环。Review 播放和配置合法不等于已经完成视觉检查。
 - “Idle 参考”叠图读取 `actions.idle.sprites[0]`；Agent 另行核对它与正式参考的关系。
 - 预览与 CLI 共用切图、处理函数。`fit_height` 按每张原图完整轮廓确定共享倍率，跨原图本体尺度和接地点由制作流程复核。
-- 自动匹配切图区域的旧 ID，新增区域分配新 ID；若应用会移除仍被动作引用的素材，则失败且保留原结果。
+- 自动识别匹配区域旧 ID；手动编辑用 `region_ids` 绑定 `boxes`，保留 ID 并使用 `next_id` 分配新 ID；若应用会移除仍被动作引用的素材，则失败且保留原结果。
 - 导出复用打包器，仅在临时目录生成网页交付文件。已有最终帧可迁移到 `processed_sprites/_approved/` 保留手工修图，`imports/` 兼容已有外部帧；两者不作为新原画的常规入口。
 
 ## 数据阶段
@@ -34,7 +34,7 @@ Agent 必须先读 [AGENTS.md](AGENTS.md)、[工作区说明](workspaces/README.
 | 阶段 | 输入与输出 | 职责 |
 | --- | --- | --- |
 | 原画采纳 | `_work/<task>/` → `source/` | 只导入确认采用的整张 sheet 或具体单帧修复原图；正式 IDLE 和用户参考放 `references/` |
-| extract | `source/` → `source_sprites/` | 保留原尺寸切片；网页可在内存完成，不要求常驻缓存 |
+| extract | `source/` → `source_sprites/` | 保留原尺寸切片；网页独立保存可复用缓存，以原图/规则指纹和切片校验和验证有效性 |
 | process | 切片 → `processed_sprites/` | 按共享函数缩放、定位，检查本体尺度与锚点；通过 apply 明确写入 |
 | select | processed 引用 → 有序动作帧 | 配置选择、排序、重复和复用；CLI 写入 `exports/frames/`，网页导出临时生成 |
 | pack / preview | 动作帧 → 图集、元数据和 WebP | CLI 默认写入工程 `exports/`；网页按需下载 ZIP |

@@ -10,16 +10,17 @@ from PIL import Image
 from scipy import ndimage
 
 from .config import Config, inside, integer
-from .files import read_image, replace_frames
+from .files import read_image
+from .slices import write_slices
 
 
-def preserve_slice_ids(boxes: list[tuple], previous: list[dict]) -> list[str]:
+def preserve_slice_ids(boxes: list[tuple], previous: list[dict], minimum_next_id: int = 0) -> list[str]:
     """Match old region identities before assigning fresh IDs to new regions."""
     old = {Path(item["file"]).stem: tuple(item["source_box"]) for item in previous
            if isinstance(item, dict) and "file" in item and "source_box" in item}
     used = set()
     result = [None] * len(boxes)
-    next_id = max([int(key) for key in old if key.isdigit()] + [-1]) + 1
+    next_id = max(minimum_next_id, max([int(key) for key in old if key.isdigit()] + [-1]) + 1)
     for i, box in enumerate(boxes):
         matches = [key for key, previous_box in old.items() if previous_box == tuple(box) and key not in used]
         if len(matches) == 1:
@@ -44,6 +45,16 @@ def preserve_slice_ids(boxes: list[tuple], previous: list[dict]) -> list[str]:
         result[i] = key
         used.add(key)
     return result
+
+
+def slice_ids(cfg: Config, filename: str, boxes: list[tuple]) -> list[str]:
+    spec = cfg.source_spec(filename)['extract']
+    explicit = spec.get('region_ids') if spec.get('method') == 'boxes' else None
+    if explicit is not None:
+        if len(explicit) != len(boxes):
+            raise ValueError('extract.region_ids must match extract.boxes')
+        return list(explicit)
+    return preserve_slice_ids(boxes, previous_slices(cfg, filename), spec.get('next_id', 0))
 
 
 def previous_slices(cfg: Config, filename: str) -> list[dict]:
@@ -185,10 +196,8 @@ def extract_source(cfg: Config, filename: str) -> int:
     spec = cfg.source_spec(filename)["extract"]
     source_path = inside(cfg.source, filename)
     frames, boxes = cut_frames(read_image(source_path), spec)
-    keys = preserve_slice_ids(boxes, previous_slices(cfg, filename))
+    keys = slice_ids(cfg, filename, boxes)
     files = {f"{key}.png": frame for key, frame in zip(keys, frames)}
-    replace_frames(inside(cfg.directory("source_sprites"), cfg.source_id(filename)), files, owned=r"\d+\.png", metadata={
-        "stage": "extract", "source": filename, "files": list(files),
-        "frames": [{"file": filename, "source_box": box} for filename, box in zip(files, boxes)],
-    })
+    write_slices(cfg, filename, dict(zip(keys, frames)),
+                 [{"file": name, "source_box": box} for name, box in zip(files, boxes)])
     return len(frames)

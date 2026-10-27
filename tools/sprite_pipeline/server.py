@@ -141,6 +141,8 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
 
     def operate(project_id: str, operation: str, payload: dict):
         project = store.get(project_id)
+        if operation == 'save-slices':
+            return project.save_slices(payload['source'], payload['extract'], payload.get('revision'), payload.get('asset_revision'))
         if operation == "restore":
             return project.restore(payload["version"], payload.get("revision"), payload.get("asset_revision"))
         data = payload["data"]

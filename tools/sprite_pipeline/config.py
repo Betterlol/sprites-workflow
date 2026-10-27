@@ -219,6 +219,13 @@ def config_from_data(data: dict, path: Path, output_root: Path | None = None) ->
         if split is not None and not isinstance(split, dict):
             raise ValueError("extract.split_widest must be an object")
         identities = settings.get("extract", {}).get("identities", [])
+        extraction = settings.get('extract', {})
+        integer(extraction.get('next_id', 0), 'extract.next_id')
+        region_ids = extraction.get('region_ids')
+        if region_ids is not None:
+            if (not isinstance(region_ids, list) or any(not isinstance(key, str) or not re.fullmatch(r'\d{3,}', key) for key in region_ids)
+                    or len(set(region_ids)) != len(region_ids) or len({int(key) for key in region_ids}) != len(region_ids)):
+                raise ValueError('extract.region_ids must contain unique numeric IDs')
         if not isinstance(identities, list):
             raise ValueError("extract.identities must be an array")
         filenames = set()
