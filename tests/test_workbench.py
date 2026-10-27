@@ -93,6 +93,25 @@ class WorkbenchTests(unittest.TestCase):
         self.assertFalse((self.root / "source_sprites").exists())
         self.assertFalse((self.root / "processed_sprites").exists())
 
+    def test_extract_preview_ignores_processing_and_preserves_native_pixels(self):
+        before = self.path.read_bytes()
+        self.data['sources']['walk.png']['process'] = {'scale': 1000}
+        response = self.post('preview', source='walk.png', stage='extract')
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result['stage'], 'extract')
+        self.assertEqual(len(result['frames']), 3)
+        frame = result['frames'][0]
+        image = Image.open(io.BytesIO(base64.b64decode(frame['url'].split(',', 1)[1]))).convert('RGBA')
+        self.assertEqual(image.size, (8, 8))
+        self.assertEqual(image.getpixel((0, 0)), (255, 0, 0, 255))
+        self.assertEqual(frame['box'], [0, 0, 8, 8])
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse((self.root / 'processed_sprites').exists())
+
+    def test_preview_rejects_unknown_stage(self):
+        self.assertEqual(self.post('preview', source='walk.png', stage='unknown').status_code, 400)
+
     def test_apply_persists_recipe_and_only_processed_images(self):
         snapshot = self.apply()
         self.assertEqual(len(snapshot["assets"]), 3)

@@ -122,13 +122,13 @@ export class Player {
   drawGuides() {
     const ctx = this.context, [width, height] = this.size, [x, y] = this.anchor;
     ctx.save();
-    ctx.strokeStyle = '#b8e77d70';
+    ctx.strokeStyle = '#77cab970';
     ctx.lineWidth = Math.max(1, width / 640);
     ctx.setLineDash([6, 6]);
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-    ctx.setLineDash([]); ctx.strokeStyle = '#d2f5a9';
+    ctx.setLineDash([]); ctx.strokeStyle = '#a6e7d8';
     ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.moveTo(x - 11, y); ctx.lineTo(x + 11, y); ctx.moveTo(x, y - 11); ctx.lineTo(x, y + 11); ctx.stroke();
-    ctx.fillStyle = '#b8e77d'; ctx.font = `${Math.max(10, width / 64)}px Consolas`; ctx.fillText('ANCHOR', x + 14, y - 9);
+    ctx.fillStyle = '#5fddc8'; ctx.font = `${Math.max(10, width / 64)}px Consolas`; ctx.fillText('锚点', x + 14, y - 9);
     ctx.restore();
   }
   drawSource() {
@@ -138,12 +138,12 @@ export class Player {
     if (image?.complete && image.naturalWidth) ctx.drawImage(image, 0, 0, ...this.size);
     [...boxes, ...(draftBox ? [draftBox] : [])].forEach((box, index) => {
       const active = index === selected || index === boxes.length;
-      ctx.strokeStyle = active ? '#b8e77d' : '#e9ba79';
+      ctx.strokeStyle = active ? '#5fddc8' : '#d4e1d9';
       ctx.lineWidth = Math.max(2, this.size[0] / 400);
-      ctx.fillStyle = active ? '#b8e77d15' : '#e9ba7910';
+      ctx.fillStyle = active ? '#5fddc815' : '#d4e1d905';
       ctx.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
       ctx.strokeRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
-      ctx.fillStyle = '#b8e77d'; ctx.font = `${Math.max(12, this.size[0] / 45)}px Consolas`; ctx.fillText(String(index).padStart(3, '0'), box[0] + 6, box[1] + Math.max(20, this.size[0] / 40));
+      ctx.fillStyle = '#5fddc8'; ctx.font = `${Math.max(12, this.size[0] / 45)}px Consolas`; ctx.fillText(String(index + 1).padStart(2, '0'), box[0] + 6, box[1] + Math.max(20, this.size[0] / 40));
     });
   }
   tick(timestamp) {

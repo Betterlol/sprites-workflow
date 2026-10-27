@@ -65,7 +65,11 @@ function register(markup) {
 register(html);
 const descendants = new Map();
 const documentListeners = new Map(), windowListeners = new Map();
-const tabs = ['source','action','review','reference'].map(mode => { const tab = new Element(); tab.dataset.mode = mode; return tab; });
+const tabs = [...html.matchAll(/<button[^>]*data-mode="([^"]+)"([^>]*)>/g)].map(([,mode,attrs]) => {
+  const tab = new Element(); tab.dataset.mode = mode;
+  const view = attrs.match(/data-view="([^"]+)"/); if (view) tab.dataset.view = view[1];
+  return tab;
+});
 const paneButtons = ['materials','canvas','properties'].map(pane => { const button = elements.get('pane-' + pane); button.dataset.pane = pane; return button; });
 const body = new Element(); body.classList.add('project-home');
 const document = {
@@ -74,7 +78,7 @@ const document = {
     if (selector.startsWith('#') && !selector.includes(' ')) return elements.get(selector.slice(1)) || null;
     if (!descendants.has(selector)) descendants.set(selector,new Element()); return descendants.get(selector);
   },
-  querySelectorAll:selector => selector === '[data-mode]' ? tabs : selector === '[data-pane]' ? paneButtons : [],
+  querySelectorAll:selector => ['[data-mode]','button[data-mode]'].includes(selector) ? tabs : selector === '[data-pane]' ? paneButtons : [],
 };
 class Player {
   constructor(canvas,area,onStep) { this.onStep = onStep; this.steps = []; this.index = 0; this.options = {}; this.images = new Map(); }
@@ -101,6 +105,7 @@ let allowDiscard = true;
 const confirmationMessages = [];
 let pausedProject = null, resumeSnapshot = null;
 let holdDragPreview = false, releaseDragPreview;
+let holdExtractPreview = false, releaseExtractPreview;
 const context = {
   ...model, ...mergeModel, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
   ResizeObserver:class { constructor(callback) { this.callback = callback; } observe(element) { observedResizes.set(element,this.callback); } },
@@ -153,9 +158,10 @@ const context = {
       else if (operation === 'preview') {
         const body = JSON.parse(options.body);
         previewRequests.push(body.source);
+        if (holdExtractPreview && body.stage === 'extract') await new Promise(resolve => { releaseExtractPreview = resolve; });
         if (body.source === 'slow.png') await new Promise(resolve => { releaseSlowPreview = resolve; });
         if (body.source === 'drag.png' && holdDragPreview) await new Promise(resolve => { releaseDragPreview = resolve; });
-        result = {scale:1,frames:[{id:'000',ref:body.source.replace('.png','/000.png'),box:[0,0,8,8],url:'/preview/' + body.source,bbox:[0,0,8,8]}]};
+        result = {stage:body.stage || 'process',scale:1,frames:[{id:'000',ref:body.source.replace('.png','/000.png'),box:[0,0,8,8],url:'/preview/' + body.source,bbox:[0,0,8,8]}]};
         if (body.source === 'drag.png') result.frames = ['000','001'].map(id => ({id,ref:`drag/${id}.png`,box:[0,0,8,8],url:`/preview/drag-${id}`,bbox:[4,5,14,17]}));
       }
       else if (operation === 'apply') {
@@ -276,7 +282,7 @@ elements.get('project-new').onclick();
 elements.get('new-project-name').value = 'new'; elements.get('new-project-id').value = 'new-id';
 await elements.get('project-form').onsubmit({preventDefault() {}});
 assert.equal(state.projectId,'new-id'); assert(!elements.get('project-dialog').open);
-assert(!body.classList.contains('project-home')); assert.equal(state.mode,'source');
+assert(!body.classList.contains('project-home')); assert.equal(state.mode,'reference');
 
 const {mode,uploadFile,selectAsset,deleteMaterials,activeSteps} = context.hooks;
 state.data.actions.idle = {fps:12,sprites:null}; state.action = 'idle'; mode('action');
@@ -623,3 +629,38 @@ assert.deepEqual(Object.keys(projects.get('alpha').data.workbench.reviews),[]);
 assert.equal(JSON.stringify(projects.get('alpha').assets),assetsBeforeSequenceDelete);
 assert(!dirty(),'Explicit saving persists action and Review deletion');
 console.log('Workbench sequence deletion: list/inspector access, reference protection, confirmation, empty states, undo and explicit save passed.');
+
+// Slicing and adjustment are distinct working views of the same unsaved source.
+state.sources = [{file:'workflow.png',url:'/sources/workflow.png',size:[16,16],count:0}];
+state.source = 'workflow.png';
+state.data.sources['workflow.png'] = {extract:{method:'grid',cols:2,rows:1},process:{scale:0.8}};
+const workflowDraft = JSON.stringify(state.data);
+mode('source','original');
+await context.hooks.previewSource();
+assert.equal(state.sourceView,'original');
+assert.equal(state.preview.stage,'extract','Slicing must request native slices rather than processed pixels');
+assert(!elements.get('inspector-content').innerHTML.includes('id="process-scale"'),'Slicing hides processing controls');
+assert.match(elements.get('timeline-title').textContent,/原帧/);
+mode('source','processed');
+await context.hooks.previewSource();
+assert.equal(state.preview.stage,'process','Adjustment must not reuse cached raw slices');
+assert(!elements.get('inspector-content').innerHTML.includes('id="extract-method"'),'Adjustment hides cutting controls');
+assert.equal(JSON.stringify(state.data),workflowDraft,'Moving between stages does not discard or save edits');
+mode('source','original');
+await context.hooks.previewSource();
+assert.equal(state.preview.stage,'extract');
+assert.equal(JSON.stringify(state.data),workflowDraft);
+assert.equal(tabs.filter(tab => tab.classList.contains('active')).length,1);
+assert.equal(tabs.find(tab => tab.classList.contains('active')).dataset.view,'original');
+holdExtractPreview = true;
+const pendingExtraction = context.hooks.previewSource(true);
+await flush();
+mode('source','processed'); await context.hooks.previewSource(true);
+releaseExtractPreview(); await pendingExtraction; holdExtractPreview = false;
+assert.equal(state.preview.stage,'process','Late extraction must not replace adjustment preview');
+assert.equal(tabs.filter(tab => tab.classList.contains('active')).length,1);
+assert.equal(tabs.find(tab => tab.classList.contains('active')).dataset.view,'processed');
+console.log('Workbench workflow: isolated slicing/adjustment previews and preserved drafts passed.');
+await showProjects();
+assert.equal(state.data,null);
+assert.equal(state.preview,null,'Returning home releases the previous preview before updating status');

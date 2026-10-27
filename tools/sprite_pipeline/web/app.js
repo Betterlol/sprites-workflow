@@ -143,10 +143,11 @@ function updateSaveStatus() {
   $('#draft-state').dataset.state = state.externalChange || draft ? 'pending' : 'ready';
   const sourceChanged = state.mode === 'source' && state.source && state.savedData &&
     JSON.stringify(sourceRecipe(state.data,state.source)) !== JSON.stringify(sourceRecipe(state.savedData,state.source));
-  const currentPreview = state.preview && state.previewSource === state.source && state.previewKey === previewKey(state.source);
+  const currentPreview = state.data && state.preview && state.previewSource === state.source && state.previewKey === previewKey(state.source);
   const preview = state.mode !== 'source' || !state.source ? '未选择原图' : state.previewError ? '预览失败' :
     sourceChanged ? (currentPreview ? '预览待应用' : '参数待预览') : '当前参数';
-  $('#preview-state').textContent = `处理预览：${preview}`;
+  $('#preview-state').textContent = state.mode === 'source' && state.sourceView === 'original'
+    ? `切割预览：${state.previewError ? '预览失败' : currentPreview ? `${state.preview.frames.length} 个区域` : '等待预览'}` : `处理预览：${preview}`;
   $('#preview-state').dataset.state = state.previewError ? 'error' : sourceChanged ? 'pending' : 'quiet';
   const stale = state.sources.filter(source => source.stale).length;
   $('#material-state').textContent = stale ? `素材：${stale} 张待更新` : '素材：已同步';
@@ -183,6 +184,7 @@ function setSnapshot(snapshot) {
   $('#project-name').textContent = name;
   $('#project-name').title = snapshot.project?.directory || '';
   if (snapshot.warnings?.length) toast(snapshot.warnings.join('\n'),true);
+  if (state.mode === 'source' && state.source) schedulePreview();
 }
 function reconcileMaterials() {
   state.source = state.sources.some(s => s.file === state.source) ? state.source : state.sources[0]?.file;
@@ -226,14 +228,15 @@ async function openProject(projectId) {
     player.reset(); state.projectId = projectId;
     state.action = null; state.source = null; state.review = null; state.reference = null; state.selected = 0; state.clip = 0;
     state.assetSelection.clear(); state.libraryMulti = false; state.lastAsset = null;
-    state.mode = snapshot.sources.length || !snapshot.assets.length ? 'source' : 'action';
-    state.sourceView = 'processed'; state.playbackMode = 'runtime';
+    state.mode = snapshot.sources.length ? 'source' : snapshot.assets.length ? 'action' : 'reference';
+    state.sourceView = 'original'; state.playbackMode = 'runtime';
     $('#asset-search').value = ''; $('#asset-source').value = '';
     $('#source-upload').value = ''; $('#processed-upload').value = ''; $('#reference-upload').value = '';
     document.body.classList.remove('project-home'); setSnapshot(snapshot); suggestReviews(); showPane('canvas');
     history.replaceState(null,'','?project=' + encodeURIComponent(projectId));
     applyLayout(); player.resize();
-    if (!snapshot.assets.length && !snapshot.sources.length) toast('工程已创建，可以导入第一张原图或单帧素材。');
+    if (state.mode === 'source') schedulePreview();
+    if (!snapshot.assets.length && !snapshot.sources.length) toast('工程已就绪，先导入角色参考，或切换到切割页导入原图。');
   });
 }
 
@@ -242,6 +245,8 @@ async function showProjects() {
   await task('正在读取工程…',async () => {
     await listProjects(); clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
     player.reset(); state.data = null; state.saved = null; state.savedData = null; state.projectId = null;
+    previewRequest?.controller.abort(); previewRequest = null;
+    state.preview = null; state.previewSource = null; state.previewKey = null; state.source = null;
     state.externalChange = false; $('#external-change').hidden = true;
     document.body.classList.add('project-home'); $('#project-name').textContent = '工程列表';
     history.replaceState(null,'',location.pathname);
@@ -373,7 +378,13 @@ async function save() {
     } catch (error) { toast('工程已保存，但素材状态暂未刷新：' + error.message,true); }
   });
 }
-function mode(value) {
+function mode(value, sourceView = 'processed') {
+  cancelFrameDrag(false);
+  $('#inspector-content').scrollTop = 0;
+  if (value === 'source' && sourceView !== state.sourceView) {
+    state.preview = null; state.previewKey = null; state.previewError = null;
+  }
+  if (value === 'source') state.sourceView = sourceView;
   state.mode = value; state.selected = 0; state.clip = 0; player.pause();
   clearTimeout(previewTimer); state.previewEpoch++; rectangleStart = null;
   if (value === 'source') schedulePreview(); renderAll();
@@ -385,8 +396,9 @@ function renderAll() {
   const actionNames = Object.keys(state.data.actions);
   if (!state.data.actions[state.action]) state.action = actionNames[0];
   if (!reviews()[state.review]) state.review = Object.keys(reviews())[0];
-  document.querySelectorAll('[data-mode]').forEach(button => {
-    const active = button.dataset.mode === state.mode; button.classList.toggle('active', active); button.setAttribute('aria-selected', active);
+  document.querySelectorAll('button[data-mode]').forEach(button => {
+    const active = (button.dataset.mode === state.mode || button.dataset.mode === 'action' && state.mode === 'review') && (!button.dataset.view || button.dataset.view === state.sourceView);
+    button.classList.toggle('active', active); button.setAttribute('aria-selected', active);
   });
   $('#editor-kind').textContent = {source:'SOURCE PROCESSING',action:'ACTION EDITOR',review:'TRANSITION REVIEW',reference:'REFERENCE IMAGES'}[state.mode];
   $('#editor-title').textContent = state.mode === 'source' ? state.source || '添加原图' : state.mode === 'action' ? state.action || '新建动作' : state.mode === 'reference' ? referenceInfo()?.file || '添加参考图' : currentReview()?.name || '新建 Review';
@@ -398,14 +410,39 @@ function renderAll() {
   $('#timeline-title').textContent = {source:'处理结果 · 点击查看单帧',action:state.playbackMode === 'runtime' ? '游戏帧时间轴' : '展示播放时间轴',review:'动作衔接时间轴',reference:'参考资料'}[state.mode];
   $('#timeline-help').textContent = {source:'处理结果中拖动图片微调位置 · 原图模式下拖拽画框',action:'拖拽排序 · 点击素材添加 · Delete 移除所选帧',review:'拖拽动作片段排序 · 片段按指定次数播放',reference:'参考图独立保存，不参与切图；完整工程备份会包含参考资料'}[state.mode];
   renderItems(); renderLibraryFilters(); renderLibrary(); renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus();
+  renderWorkflow();
+}
+function renderWorkflow() {
+  const slicing = state.mode === 'source' && state.sourceView === 'original';
+  document.body.dataset.mode = state.mode;
+  document.body.dataset.sourceView = state.sourceView;
+  $('#editor-kind').textContent = {reference:'角色资料',source:slicing ? '切割原帧' : '调整与对齐',action:'动作编排',review:'衔接检查'}[state.mode];
+  $('#sidebar-title').textContent = {reference:'人设与参考',source:'原图素材',action:'动作列表',review:'衔接序列'}[state.mode];
+  $('#inspector-title').textContent = {reference:'角色约定',source:slicing ? '切割设置' : '帧调整',action:'动作设置',review:'衔接设置'}[state.mode];
+  $('#inspector-step').textContent = state.mode === 'source' ? slicing ? '02 / 05' : '03 / 05' : '';
+  $('#timeline-title').textContent = state.mode === 'source' ? slicing ? '原帧预览 · 保留原始尺寸' : '调整预览 · 点击选择单帧' : $('#timeline-title').textContent;
+  $('#timeline-help').textContent = state.mode === 'source' ? slicing ? '拖拽新增区域 · 点击选择 · 右侧编辑范围' : '拖动当前帧调整位置 · 应用后同步到动作' : $('#timeline-help').textContent;
+  $('#reference-board').hidden = state.mode !== 'reference';
+  $('#action-navigation').hidden = !['action','review'].includes(state.mode);
+  $('#action-edit').classList.toggle('active',state.mode === 'action');
+  $('#action-review').classList.toggle('active',state.mode === 'review');
+  const idle = asset(state.data.actions.idle?.sprites?.[0]);
+  $('#sidebar-context').innerHTML = state.mode !== 'reference' ? `<h3>当前 IDLE 首帧</h3>${idle ? `<img src="${escape(idle.url)}" alt="当前 IDLE 动作首帧"><p>用于播放时的基准对照</p>` : '<p>还没有可用的 idle 动作。可先完成原帧调整，再编排动作。</p>'}<button id="context-reference" class="text-button">查看角色参考 →</button>` : '<p>导入人设或已确认的参考图，随时对照角色形象。</p>';
+  $('#context-reference')?.addEventListener('click',() => mode('reference'));
+  if (state.mode === 'reference') {
+    const ref = referenceInfo();
+    $('#reference-board').innerHTML = `<div class="reference-heading"><span class="eyebrow">CHARACTER REFERENCE</span><h1>先对齐角色，再开始创作</h1><p>对照人设与当前 IDLE，检查形象、比例和配色。</p></div><div class="reference-comparison"><section><header><h2>人设参考</h2><button id="board-import" class="text-button">＋ 导入参考图</button></header><div class="reference-art">${ref ? `<img src="${escape(ref.url)}" alt="${escape(ref.file)}">` : '<div class="reference-empty">还没有参考图<br><small>导入人设图，开始建立角色</small></div>'}</div><footer>${escape(ref?.file || '支持 PNG、WebP 等图片')}</footer></section><section><header><h2>当前 IDLE 首帧</h2><span class="badge">播放参考</span></header><div class="reference-art checker">${idle ? `<img src="${escape(idle.url)}" alt="当前 IDLE 首帧">` : '<div class="reference-empty">尚未建立 idle 动作<br><small>完成切割和调整后，在动作页添加帧</small></div>'}</div><footer>${escape(idle?.ref || '当前未绑定可播放的 IDLE')}</footer></section></div><div class="reference-next"><p>参考图用于对照；要制作动画，请另行导入动作原图。</p><button id="board-next" class="primary">开始切割原图 →</button></div>`;
+    $('#board-import').onclick = () => $('#reference-upload').click();
+    $('#board-next').onclick = () => mode('source','original');
+  }
 }
 function renderItems() {
-  const items = state.mode === 'source' ? state.sources.map(source => ({id:source.file,name:source.file,count:source.count,stale:source.stale}))
-    : state.mode === 'reference' ? state.references.map(image => ({id:image.ref,name:image.file,count:image.size.join('×')}))
-    : state.mode === 'action' ? Object.entries(state.data.actions).map(([id, action]) => ({id,name:id,count:frames(action).length}))
+  const items = state.mode === 'source' ? state.sources.map(source => ({id:source.file,name:source.file,count:source.count,stale:source.stale,url:source.url}))
+    : state.mode === 'reference' ? state.references.map(image => ({id:image.ref,name:image.file,count:image.size.join('×'),url:image.url}))
+    : state.mode === 'action' ? Object.entries(state.data.actions).map(([id, action]) => ({id,name:id,count:frames(action).length,url:asset(frames(action)[0])?.url}))
     : Object.entries(reviews()).map(([id, review]) => ({id,name:review.name || id,count:review.clips.length}));
   const selected = {source:state.source,action:state.action,review:state.review,reference:state.reference}[state.mode];
-  $('#item-list').innerHTML = items.map(item => `<button class="item-row ${item.id === selected ? 'active' : ''}" data-item="${escape(item.id)}" title="${escape(item.name)}"><span class="item-icon">${state.mode === 'review' ? '⇢' : state.mode === 'source' ? '▧' : '▤'}</span><span class="item-name">${escape(item.name)}</span><small class="${item.stale ? 'stale' : ''}">${item.stale ? '待更新' : String(item.count).padStart(2,'0')}</small></button>`).join('') || '<p class="hint" style="padding:12px">点击 ＋ 开始创建</p>';
+  $('#item-list').innerHTML = items.map(item => `<button class="item-row ${item.id === selected ? 'active' : ''}" data-item="${escape(item.id)}" title="${escape(item.name)}">${item.url ? `<img class="item-thumbnail" src="${escape(item.url)}" alt="" loading="lazy">` : `<span class="item-icon">${state.mode === 'review' ? '⇢' : '▧'}</span>`}<span class="item-name">${escape(item.name)}</span><small class="${item.stale ? 'stale' : ''}">${item.stale ? '待更新' : escape(String(item.count).padStart(2,'0'))}</small></button>`).join('') || '<p class="hint" style="padding:12px">点击 ＋ 开始创建</p>';
   $('#item-list').querySelectorAll('[data-item]').forEach(button => {
     button.onclick = () => {
       state[state.mode] = button.dataset.item; state.selected = 0; state.clip = 0; player.pause();
@@ -468,6 +505,7 @@ function activeSteps() {
   if (state.mode === 'source') {
     if (state.preview && state.previewSource === state.source) return state.preview.frames.map((frame, i) => ({...frame, frame:i, duration_ms:100,
       ...(state.previewOffsets[frame.id] ? {previewOffset:state.previewOffsets[frame.id]} : {})}));
+    if (state.sourceView === 'original') return [];
     const prefix = state.source ? state.source.replace(/\.[^.]+$/, '') + '/' : '';
     return state.assets.filter(a => prefix && a.ref.startsWith(prefix)).map((a, i) => ({...a, frame:i, id:a.ref.split('/').pop().replace('.png',''),duration_ms:100}));
   }
@@ -505,7 +543,7 @@ function onStep(index) {
   if (!state.data) return;
   const step = player.steps[index];
   $('#play-position').textContent = `${String(step ? index + 1 : 0).padStart(3,'0')} / ${String(player.steps.length).padStart(3,'0')}`;
-  $('#frame-info').textContent = step ? `${step.action ? step.action + ' / ' : ''}${step.ref || step.id} · ${step.duration_ms} ms` : '—';
+  $('#frame-info').textContent = state.mode === 'source' && state.sourceView === 'original' ? `区域 ${String(index + 1).padStart(2,'0')} · 原始尺寸` : step ? `${step.action ? step.action + ' / ' : ''}${step.ref || step.id} · ${step.duration_ms} ms` : '—';
   $('#play').textContent = player.playing ? 'Ⅱ' : '▶';
   document.querySelectorAll('.timeline-card').forEach(card => {
     const active = state.mode === 'review' ? Number(card.dataset.index) === step?.clip : Number(card.dataset.index) === index;
@@ -517,8 +555,8 @@ function renderTimeline() {
   const cards = state.mode === 'review' ? (currentReview()?.clips || []).map((clip, index) => {
     const first = actionSteps(state.data,clip.action,currentReview().mode)[clip.start || 0];
     return {index, ref:first?.ref, caption:`${clip.repeat}× · ${clip.start || 0}–${clip.end ?? 'END'}`,name:clip.action};
-  }) : steps.map((step,index) => ({...step,index,caption:`${step.duration_ms} ms`}));
-  timeline.innerHTML = cards.map(card => `<button class="timeline-card ${state.mode === 'review' ? 'clip' : ''} ${card.index === (state.mode === 'review' ? state.clip : state.selected) ? 'selected' : ''}" data-index="${card.index}" draggable="${state.mode !== 'source'}" title="${escape(card.ref || card.name)}">${state.mode === 'review' ? `<span class="clip-name">${escape(card.name)}</span>` : ''}${card.url || asset(card.ref)?.url ? `<img src="${escape(card.url || asset(card.ref).url)}" alt="${escape(card.ref)}">` : '<span style="height:73px;padding:20px;color:#ef9292">缺失</span>'}<span class="frame-caption"><span>${String(card.index).padStart(3,'0')}</span><span>${escape(card.caption)}</span></span></button>`).join('') || '<div class="timeline-empty">将素材或动作拖到这里，开始编排 →</div>';
+  }) : steps.map((step,index) => ({...step,index,caption:state.mode === 'source' && state.sourceView === 'original' ? `${step.box?.[2]-step.box?.[0]} × ${step.box?.[3]-step.box?.[1]}` : `${step.duration_ms} ms`}));
+  timeline.innerHTML = cards.map(card => `<button class="timeline-card ${state.mode === 'review' ? 'clip' : ''} ${card.index === (state.mode === 'review' ? state.clip : state.selected) ? 'selected' : ''}" data-index="${card.index}" draggable="${state.mode !== 'source'}" title="${escape(card.ref || card.name)}">${state.mode === 'review' ? `<span class="clip-name">${escape(card.name)}</span>` : ''}${card.url || asset(card.ref)?.url ? `<img src="${escape(card.url || asset(card.ref).url)}" alt="${escape(card.ref)}">` : '<span style="height:73px;padding:20px;color:#ef9292">缺失</span>'}<span class="frame-caption"><span>${state.mode === 'source' ? String(card.index + 1).padStart(2,'0') : String(card.index).padStart(3,'0')}</span><span>${escape(card.caption)}</span></span></button>`).join('') || '<div class="timeline-empty">将素材或动作拖到这里，开始编排 →</div>';
   timeline.scrollLeft = scrollLeft;
   const tools = state.mode === 'reference' ? '' : state.mode === 'source' ? '<button id="source-preview">刷新预览</button>' : state.mode === 'action' ? '<button id="duplicate-frame">重复帧</button><button id="reverse-frames">倒序</button><button id="remove-frame">移除</button>' : '<button id="add-clip">＋ 动作片段</button><button id="remove-clip">移除</button>';
   $('#timeline-tools').innerHTML = tools;
@@ -612,12 +650,17 @@ function addClip(name, at) {
 }
 
 function renderInspector() {
+  $('#inspector-actions').innerHTML = '';
   if (state.mode === 'reference') {
     const image = referenceInfo();
-    $('#inspector-content').innerHTML = image ? section('参考图',info('文件',image.ref) + info('尺寸',image.size.join(' × '))) + '<p class="hint">参考图保存在 references/，不参与原图处理。使用左上角 ＋ 可多选导入，删除入口在参考图列表上方。旧 reference/ 中的图片也会显示。</p>' : '<p class="hint">点击参考图旁的 ＋，可一次导入多张参考图。</p>';
+    $('#inspector-content').innerHTML = section('工程画布',info('尺寸',state.data.frame_size.join(' × ')) + info('锚点',state.data.anchor.pixels.join(', ')) + '<button id="reference-settings" class="wide">修改工程设置</button>') + (image ? section('所选参考',info('文件',image.file) + info('尺寸',image.size.join(' × '))) : '<p class="hint">点击 ＋ 导入人设图或已确认的角色参考。</p>') + section('对照要点','<ul class="reference-checklist"><li>角色朝向与头身比例</li><li>配色、服装与道具状态</li><li>身体大小与脚底位置</li></ul><p class="hint">当前 IDLE 首帧来自已有动作，不代表已经通过视觉验收。</p>');
+    $('#reference-settings').onclick = () => $('#settings-open').click();
     return;
   }
-  $('#inspector-content').innerHTML = state.mode === 'source' ? sourceInspector() : state.mode === 'action' ? actionInspector() : reviewInspector();
+  const markup = state.mode === 'source' ? sourceInspector() : state.mode === 'action' ? actionInspector() : reviewInspector();
+  const footer = state.mode === 'source' ? markup.indexOf('<div class="inspector-next">') : -1;
+  $('#inspector-content').innerHTML = footer < 0 ? markup : markup.slice(0,footer);
+  if (footer >= 0) $('#inspector-actions').innerHTML = markup.slice(footer);
   if (state.mode === 'source') bindSourceInspector(); else if (state.mode === 'action') bindActionInspector(); else bindReviewInspector();
 }
 function actionInspector() {
@@ -680,37 +723,42 @@ function resolvedSource() {
 function sourceRules() { state.data.sources ||= {}; return state.data.sources[state.source] ||= {}; }
 function selectedSlice() { return activeSteps()[state.selected]; }
 function sourceInspector() {
-  if (!state.source) return '<p class="hint">点击左上角 ＋ 导入原图。</p>';
-  const rules = resolvedSource(), extract = rules.extract, process = rules.process, slice = selectedSlice();
+  if (!state.source) return '<div class="inspector-empty"><h3>从一张原图开始</h3><p>点击左上角 ＋ 导入动作原图，再选择自动识别、网格或手动框选。</p></div>';
+  const {extract,process} = resolvedSource(), slice = selectedSlice();
   const override = process.overrides?.[slice?.id] || {};
-  const method = extract.method || 'components';
-  const methods = [['components','自动连通域'],['grid','规则网格'],['boxes','手动区域'],['image','整张单帧']];
-  return section('查看方式',`<div class="mode-switch"><button id="view-processed" class="${state.sourceView === 'processed' ? 'active' : ''}">处理结果</button><button id="view-original" class="${state.sourceView === 'original' ? 'active' : ''}">原图 / 切图</button></div>` + info('原图尺寸',sourceInfo().size.join(' × ')) +
-    (state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '') +
-    '<p class="hint">预览使用未保存的参数。“应用处理”会更新该原图的 processed 素材，并保存当前工程草稿。</p>') +
-    section('切图规则',label('切图方式',`<select id="extract-method">${methods.map(([value,name]) => `<option value="${value}" ${value === method ? 'selected' : ''}>${name}</option>`).join('')}</select>`) +
+  const error = state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '';
+  if (state.sourceView === 'original') {
+    const method = extract.method || 'components';
+    const methods = [['components','自动识别'],['grid','规则网格'],['boxes','手动区域'],['image','整张单帧']];
+    const box = slice?.box || extract.boxes?.[state.selected];
+    return error + section('切割方式',label('识别方式',`<select id="extract-method">${methods.map(([value,name]) => `<option value="${value}" ${value === method ? 'selected' : ''}>${name}</option>`).join('')}</select>`) +
       (['grid','components'].includes(method) ? `<div class="field-row">${label('列数',number('extract-cols',extract.cols ?? '', 'min="1" placeholder="自动"'))}${label('行数',number('extract-rows',extract.rows ?? '', 'min="1" placeholder="自动"'))}</div>` : '') +
-      (method === 'components' ? `<label class="field-inline">透明度阈值${number('extract-alpha',extract.alpha_threshold || 16,'min="1" max="255"')}</label><details><summary>连通域高级参数</summary>${label('最小组件像素',number('extract-min',extract.min_component_pixels || 80,'min="1"'))}${label('主体最少像素',number('extract-major',extract.major_min_pixels || 10000,'min="1"'))}${label('主体占比',number('extract-fraction',extract.major_fraction ?? .02,'min="0" max="1" step="0.01"'))}</details>` : '') +
-      (method === 'boxes' ? `<p class="hint">切换到原图，在画布上拖拽添加矩形。坐标顺序为 left, top, right, bottom。</p>${label('切图区域 JSON',`<textarea id="extract-boxes" rows="4">${escape(JSON.stringify(extract.boxes || []))}</textarea>`)}<button id="remove-box" class="wide">移除所选区域</button>` : '') +
-      '<details><summary>原图切图规则 JSON</summary><textarea id="extract-json" rows="6" style="width:100%">' + escape(JSON.stringify(extract,null,2)) + '</textarea><button id="apply-extract-json" class="wide" style="margin-top:8px">更新切图规则</button></details>') +
-    section('整组处理',label('处理方式',`<select id="process-mode"><option value="anchor" ${process.mode === 'anchor' || !process.mode ? 'selected' : ''}>轮廓裁切 + 锚点对齐</option><option value="contain" ${process.mode === 'contain' ? 'selected' : ''}>完整切片等比容纳</option><option value="copy" ${process.mode === 'copy' ? 'selected' : ''}>原样复制（相同画布）</option></select>`) +
-      `<div class="field-row">${label('基础缩放',number('process-scale',process.scale ?? 1,'min="0.01" max="10" step="0.01"'))}${label('目标高度',number('process-height',process.fit_height ?? '', 'min="1" placeholder="不启用"'))}</div>` +
+      (method === 'components' ? `<details><summary>识别参数</summary>${label('透明度阈值',number('extract-alpha',extract.alpha_threshold || 16,'min="1" max="255"'))}${label('最小组件像素',number('extract-min',extract.min_component_pixels || 80,'min="1"'))}${label('主体最少像素',number('extract-major',extract.major_min_pixels || 10000,'min="1"'))}${label('主体占比',number('extract-fraction',extract.major_fraction ?? .02,'min="0" max="1" step="0.01"'))}</details>` : '') + '<button id="detect-slices" class="wide">重新预览切割</button>') +
+      section(`所选区域 ${String(state.selected + 1).padStart(2,'0')}`,box ? `<div class="field-row">${label('X',number('slice-x',box[0],'min="0"'))}${label('Y',number('slice-y',box[1],'min="0"'))}</div><div class="field-row">${label('宽度',number('slice-width',box[2]-box[0],'min="1"'))}${label('高度',number('slice-height',box[3]-box[1],'min="1"'))}</div><p class="hint">修改范围会切换为手动区域。坐标使用原图像素。</p><button id="remove-box" class="wide danger">移除此区域</button>` : '<p class="hint">预览后选择一帧，或在原图上拖拽新增区域。</p>') +
+      section('原帧',info('原图尺寸',sourceInfo().size.join(' × ')) + '<p class="hint">保留原始尺寸与透明像素。此处只切割，不缩放或对齐。</p>') +
+      `<details class="advanced-rules"><summary>高级切割规则</summary><textarea id="extract-json" rows="6">${escape(JSON.stringify(extract,null,2))}</textarea><button id="apply-extract-json" class="wide">更新切割规则</button></details>` +
+      '<div class="inspector-next"><button id="save-slices" class="wide">保存工程草稿</button><button id="view-processed" class="primary wide">下一步：调整帧 →</button><p class="hint">保存当前工程参数，不改写已处理图片。</p></div>';
+  }
+  return error + section('单帧微调',slice ? `<span class="selected-ref">${escape(slice.ref)}</span><div class="field-row">${label('水平偏移',number('override-x',override.offset?.[0] ?? process.offset?.[0] ?? 0,'step="1"'))}${label('垂直偏移',number('override-y',override.offset?.[1] ?? process.offset?.[1] ?? 0,'step="1"'))}</div>` +
+      label('独立缩放倍率',number('override-scale',override.scale ?? '', 'min="0.01" max="10" step="0.01" placeholder="继承整组"')) + '<p class="hint">可直接拖动画面中的当前帧。单帧设置覆盖整组值；留空缩放可继承整组。</p><button id="clear-override" class="wide">重置本帧</button>' : '<p class="hint">正在准备预览。选择下方原帧后可单独调整。</p>') +
+    section('整组基准',label('对齐方式',`<select id="process-mode"><option value="anchor" ${process.mode === 'anchor' || !process.mode ? 'selected' : ''}>轮廓裁切 + 锚点对齐</option><option value="contain" ${process.mode === 'contain' ? 'selected' : ''}>完整切片等比容纳</option><option value="copy" ${process.mode === 'copy' ? 'selected' : ''}>原样复制（相同画布）</option></select>`) +
+      `<div class="field-row">${label('缩放倍率',number('process-scale',process.scale ?? 1,'min="0.01" max="10" step="0.01"'))}${label('目标高度',number('process-height',process.fit_height ?? '', 'min="1" placeholder="不启用"'))}</div>` +
       `<div class="field-row">${label('水平偏移',number('process-x',process.offset?.[0] || 0,'step="1"'))}${label('垂直偏移',number('process-y',process.offset?.[1] || 0,'step="1"'))}</div>` +
-      `<label class="field-inline">最大自适应倍率${number('process-max-scale',process.max_scale ?? 1,'min="0.01" max="10" step="0.05"')}</label><label class="field-inline">垂直限制在画布内<input id="process-clamp" type="checkbox" ${process.clamp_y ? 'checked' : ''}></label>` +
-      `<label class="field-inline">边缘留白${number('process-padding',process.padding ?? 0,'min="0"')}</label><label class="field-inline">越界处理<select id="process-overflow"><option value="error" ${process.overflow !== 'clip' ? 'selected' : ''}>提示错误</option><option value="clip" ${process.overflow === 'clip' ? 'selected' : ''}>允许裁切</option></select></label>` +
-      info('实际组缩放',state.preview?.scale?.toFixed(4) || '预览后显示') + '<p class="hint">目标高度按整组最高轮廓计算共同缩放，保留帧间体型差异。</p>' +
-      '<details><summary>处理规则 JSON（含所有帧覆盖）</summary><textarea id="process-json" rows="7" style="width:100%">' + escape(JSON.stringify(process,null,2)) + '</textarea><button id="apply-process-json" class="wide" style="margin-top:8px">更新处理规则</button></details>') +
-    section('所选帧覆盖',slice ? `<span class="selected-ref">${escape(slice.ref)}</span><div class="field-row">${label('水平偏移',number('override-x',override.offset?.[0] ?? process.offset?.[0] ?? 0,'step="1"'))}${label('垂直偏移',number('override-y',override.offset?.[1] ?? process.offset?.[1] ?? 0,'step="1"'))}</div>` +
-      label('独立绝对缩放',number('override-scale',override.scale ?? '', 'min="0.01" max="10" step="0.01" placeholder="继承整组"')) + '<p class="hint">在“处理结果”中直接拖动图片，偏移数值同步变化；可开启“前帧叠图”对齐。松手后按当前画布限制和越界规则刷新预览，满意后再应用并保存。一次拖动可一次撤销，Esc 取消本次拖动。原样复制模式不支持移位。</p><p class="hint">单帧缩放覆盖整组最终倍率；偏移覆盖整组偏移。</p><button id="clear-override" class="wide">清除此帧覆盖</button>' : '<p class="hint">预览处理后选择一帧。</p>') +
-    section('应用处理','<button id="apply-source" class="primary wide">应用处理并保存工程</button><p class="hint">所有引用这些素材的动作会同步更新。原图和已发布的最终帧会保留。</p>');
+      info('实际组缩放',state.preview?.scale?.toFixed(4) || '预览后显示') +
+      `<details><summary>边界与高级设置</summary><label class="field-inline">最大自适应倍率${number('process-max-scale',process.max_scale ?? 1,'min="0.01" max="10" step="0.05"')}</label><label class="field-inline">垂直限制在画布内<input id="process-clamp" type="checkbox" ${process.clamp_y ? 'checked' : ''}></label><label class="field-inline">边缘留白${number('process-padding',process.padding ?? 0,'min="0"')}</label><label class="field-inline">越界处理<select id="process-overflow"><option value="error" ${process.overflow !== 'clip' ? 'selected' : ''}>提示错误</option><option value="clip" ${process.overflow === 'clip' ? 'selected' : ''}>允许裁切</option></select></label><p class="hint">目标高度按整组最高轮廓计算，不逐帧拉成同高。</p></details>`) +
+    `<details class="advanced-rules"><summary>高级处理规则</summary><textarea id="process-json" rows="7">${escape(JSON.stringify(process,null,2))}</textarea><button id="apply-process-json" class="wide">更新处理规则</button></details>` +
+    '<div class="inspector-next"><button id="apply-source" class="primary wide">应用调整并保存工程</button><p class="hint">更新当前原图的整组素材，并保存工程草稿。动作播放使用已应用的结果。</p><div class="boundary-controls"><button id="view-original">← 返回切割</button><button id="next-actions">编排动作 →</button></div></div>';
 }
 function bindSourceInspector() {
   if (!state.source) return;
   const opts = {preview:true};
   const setExtract = (key,value) => { const rules = sourceRules(); rules.extract ||= {}; rules.extract[key] = value; };
   const setProcess = (key,value) => { const rules = sourceRules(); rules.process ||= {}; rules.process[key] = value; };
-  $('#view-original').onclick = () => { state.sourceView = 'original'; player.pause(); renderAll(); };
-  $('#view-processed').onclick = () => { state.sourceView = 'processed'; renderAll(); };
+  $('#view-original')?.addEventListener('click',() => mode('source','original'));
+  $('#view-processed')?.addEventListener('click',() => mode('source','processed'));
+  $('#detect-slices')?.addEventListener('click',() => previewSource(true));
+  $('#save-slices')?.addEventListener('click',save);
+  $('#next-actions')?.addEventListener('click',() => mode('action'));
   bindValue('extract-method', value => {
     setExtract('method',value);
     if (value === 'boxes') {
@@ -725,15 +773,29 @@ function bindSourceInspector() {
   bindValue('extract-cols',value => setLayout('cols',value),opts); bindValue('extract-rows',value => setLayout('rows',value),opts);
   [['extract-alpha','alpha_threshold'],['extract-min','min_component_pixels'],['extract-major','major_min_pixels'],['extract-fraction','major_fraction']].forEach(([id,key]) => bindValue(id,value => setExtract(key,value),opts));
   bindValue('extract-boxes', value => { try { const boxes = JSON.parse(value); if (!Array.isArray(boxes)) throw new Error(); setExtract('boxes',boxes); } catch { toast('区域必须是矩形坐标数组',true); } },opts);
-  $('#apply-extract-json').onclick = () => {
+  if ($('#apply-extract-json')) $('#apply-extract-json').onclick = () => {
     try { const rules = JSON.parse($('#extract-json').value); if (!rules || Array.isArray(rules) || typeof rules !== 'object') throw new Error(); change(() => { sourceRules().extract = rules; },opts); }
     catch { toast('切图规则必须是有效的 JSON 对象',true); }
   };
-  $('#apply-process-json').onclick = () => {
+  if ($('#apply-process-json')) $('#apply-process-json').onclick = () => {
     try { const rules = JSON.parse($('#process-json').value); if (!rules || Array.isArray(rules) || typeof rules !== 'object') throw new Error(); change(() => { sourceRules().process = rules; },opts); }
     catch { toast('处理规则必须是有效的 JSON 对象',true); }
   };
-  $('#remove-box')?.addEventListener('click', () => change(() => { const boxes = [...(resolvedSource().extract.boxes || [])]; boxes.splice(state.selected,1); setExtract('boxes',boxes); state.selected = Math.max(0,state.selected - 1); },opts));
+  const currentBoxes = () => (state.preview?.frames.map(frame => frame.box) || resolvedSource().extract.boxes || []).map(box => [...box]);
+  const setBoxes = boxes => { setExtract('method','boxes'); setExtract('boxes',boxes); };
+  ['x','y','width','height'].forEach(key => bindValue('slice-' + key,value => {
+    const boxes = currentBoxes(), box = boxes[state.selected]; if (!box || value === null) return;
+    const [x,y,right,bottom] = box;
+    const next = key === 'x' ? [value,y,value+right-x,bottom] : key === 'y' ? [x,value,right,value+bottom-y] : key === 'width' ? [x,y,x+value,bottom] : [x,y,right,y+value];
+    const [width,height] = sourceInfo().size;
+    if (next[2] > width || next[3] > height) { toast('区域不能超出原图边界',true); return; }
+    boxes[state.selected] = next; setBoxes(boxes);
+  },opts));
+  $('#remove-box')?.addEventListener('click', () => {
+    const boxes = currentBoxes();
+    if (boxes.length <= 1) { toast('至少保留一个区域；可调整范围或删除整张原图',true); return; }
+    change(() => { boxes.splice(state.selected,1); setBoxes(boxes); state.selected = Math.max(0,state.selected - 1); },opts);
+  });
   [['process-mode','mode'],['process-scale','scale'],['process-height','fit_height'],['process-max-scale','max_scale'],['process-clamp','clamp_y'],['process-padding','padding'],['process-overflow','overflow']].forEach(([id,key]) => bindValue(id,value => setProcess(key,value),opts));
   ['x','y'].forEach((axis,index) => bindValue('process-' + axis,value => { const offset = [...(resolvedSource().process.offset || [0,0])]; offset[index] = value; setProcess('offset',offset); },opts));
   const setOverride = (key,value) => {
@@ -749,13 +811,13 @@ function bindSourceInspector() {
   $('#clear-override')?.addEventListener('click', () => change(() => {
     const overrides = clone(resolvedSource().process.overrides || {}); delete overrides[selectedSlice().id]; setProcess('overrides',overrides);
   },opts));
-  $('#apply-source').onclick = () => task('正在应用处理并保存工程…',async () => {
+  if ($('#apply-source')) $('#apply-source').onclick = () => task('正在应用处理并保存工程…',async () => {
     const snapshot = await api('apply',payload({source:state.source})); setSnapshot(snapshot); toast('已更新 processed 素材和工程配置'); await previewSource();
   });
 }
 function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(() => previewSource(),350); }
 function previewKey(source) {
-  return JSON.stringify([state.projectId, source, sourceInfo()?.url, state.assetRevision,
+  return JSON.stringify([state.projectId, source, state.sourceView, sourceInfo()?.url, state.assetRevision,
     state.data.frame_size, state.data.anchor, state.data.defaults?.extract, state.data.defaults?.process,
     state.data.sources?.[source]]);
 }
@@ -763,10 +825,10 @@ function showPreview(result, source, key) {
   state.preview = result; state.previewSource = source; state.previewKey = key; state.previewError = null; state.previewOffsets = {};
   state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
   if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus(); }
-  $('#status-message').textContent = `处理预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
+  $('#status-message').textContent = result.stage === 'extract' ? `切割预览：${result.frames.length} 帧 · 原始尺寸 · 未改写素材` : `调整预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
 }
 async function previewSource(force = false) {
-  if (!state.source) return;
+  if (!state.source || !state.data || !state.projectId || state.mode !== 'source') return;
   const epoch = ++state.previewEpoch, source = state.source, key = previewKey(source);
   if (force) previewCache.delete(key);
   if (previewCache.has(key)) { showPreview(previewCache.get(key),source,key); return; }
@@ -775,7 +837,7 @@ async function previewSource(force = false) {
   if (!request || request.key !== key || force) {
     request?.controller.abort();
     const controller = new AbortController();
-    request = {key,controller,promise:api('preview',{data:clone(state.data),source},false,controller.signal)};
+    request = {key,controller,promise:api('preview',{data:clone(state.data),source,stage:state.sourceView === 'original' ? 'extract' : 'process'},false,controller.signal)};
     previewRequest = request;
   }
   try {
@@ -934,13 +996,15 @@ $('#stage').addEventListener('pointerup', event => {
   }
   change(() => {
     const current = resolvedSource().extract, rules = sourceRules();
-    rules.extract = {...current,method:'boxes',boxes:[...(current.method === 'boxes' ? current.boxes || [] : []),box]};
+    rules.extract = {...current,method:'boxes',boxes:[...(state.preview?.frames.map(frame => frame.box) || current.boxes || []),box]};
     state.selected = rules.extract.boxes.length - 1;
   },{preview:true});
 });
 $('#stage').addEventListener('pointercancel', () => { rectangleStart = null; if (player.sourceView) delete player.sourceView.draftBox; player.draw(); });
 
-document.querySelectorAll('[data-mode]').forEach(button => { button.onclick = () => mode(button.dataset.mode); });
+document.querySelectorAll('button[data-mode]').forEach(button => { button.onclick = () => mode(button.dataset.mode,button.dataset.view); });
+$('#action-edit').onclick = () => mode('action');
+$('#action-review').onclick = () => mode('review');
 $('#asset-search').oninput = renderLibrary; $('#asset-source').onchange = renderLibrary;
 $('#asset-multiselect').onchange = () => { state.libraryMulti = $('#asset-multiselect').checked; if (!state.libraryMulti) state.assetSelection.clear(); renderLibrary(); };
 $('#assets-select-visible').onclick = () => { state.libraryMulti = true; visibleAssets().forEach(a => state.assetSelection.add(a.ref)); renderLibrary(); };
@@ -1115,7 +1179,7 @@ async function uploadFile(input,kind) {
         if (error.status === 409 || error.status === 403) { skipped = files.length - index - 1; break; }
       }
     }
-    if (imported.length && kind === 'source') { state.source = imported[0]; mode('source'); }
+    if (imported.length && kind === 'source') { state.source = imported[0]; mode('source','original'); }
     if (imported.length && kind === 'reference') { state.reference = 'references/' + imported[0]; mode('reference'); }
     toast(`已导入 ${imported.length}/${files.length} 张${skipped ? `，未处理 ${skipped} 张` : ''}${failures.length ? '\n' + failures.join('\n') : '，工程已保存'}`,failures.length > 0);
   });

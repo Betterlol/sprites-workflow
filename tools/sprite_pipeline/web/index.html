@@ -3,29 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#121419">
+  <meta name="theme-color" content="#f4f5f2">
   <title>Sprite Workbench · 动作工作台</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/studio.css">
   <script type="module" src="/static/app.js"></script>
 </head>
 <body class="project-home">
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Sprite Workbench 首页"><span class="brand-mark">S<span>·</span></span><span>SPRITE<span class="brand-sub">WORKBENCH</span></span></a>
+    <a class="brand" href="/" aria-label="Sprite Workbench 首页"><span class="brand-mark">S<span>·</span></span><span>Sprite <span class="brand-sub">Workbench</span></span></a>
     <div class="project-label"><span class="status-dot"></span><span id="project-name">正在打开工程…</span><span class="local-tag">LOCAL</span></div>
     <button id="projects-open" class="subtle">工程列表</button>
     <div class="top-actions">
       <button id="undo" class="icon-button" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
       <button id="redo" class="icon-button" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button>
-      <button id="settings-open" class="subtle">工程设置</button>
-      <button id="history-open" class="subtle">版本记录</button>
-      <button id="reload" class="subtle">重新载入</button>
-      <button id="save">保存工程 <kbd>Ctrl S</kbd></button>
-      <button id="export-open" class="primary">导出资源 <span>↗</span></button>
+      <details class="project-menu"><summary>工程选项</summary><div><button id="settings-open">工程设置</button><button id="history-open">版本记录</button><button id="reload">重新载入</button></div></details>
+      <button id="save" class="primary">保存工程 <kbd>Ctrl S</kbd></button>
     </div>
   </header>
 
   <section id="projects-home" class="projects-home">
-    <div class="projects-heading"><div><span class="eyebrow">YOUR PROJECTS</span><h1>Sprite 工程</h1><p class="muted">创建工程，导入原图，再处理素材和编排动作。</p></div><div class="project-home-actions"><button id="projects-refresh">刷新列表</button><button id="project-new" class="primary">＋ 新建工程</button></div></div>
+    <div class="projects-heading"><div><span class="eyebrow">SPRITE WORKBENCH</span><h1>我的创作工程</h1><p class="muted">从角色参考到连贯动作，在一个工作台里完成。</p></div><div class="project-home-actions"><button id="projects-refresh">刷新列表</button><button id="project-new" class="primary">＋ 新建工程</button></div></div>
+    <div class="home-workflow"><span>01 角色基准</span><span>02 切割原帧</span><span>03 调整与对齐</span><span>04 动作编排</span><span>05 导出资源</span></div>
     <p id="workspace-location" class="hint"></p>
     <div id="project-list" class="project-grid" aria-live="polite"><p class="muted">正在读取工程列表…</p></div>
   </section>
@@ -35,10 +34,11 @@
 
   <nav class="modebar" aria-label="工作模式">
     <div class="mode-tabs" role="tablist">
-      <button data-mode="source" role="tab" aria-selected="false"><span>01</span> 素材处理</button>
-      <button data-mode="action" role="tab" aria-selected="true" class="active"><span>02</span> 动作编排</button>
-      <button data-mode="review" role="tab" aria-selected="false"><span>03</span> 衔接 Review</button>
-      <button data-mode="reference" role="tab" aria-selected="false"><span>04</span> 参考图</button>
+      <button data-mode="reference" role="tab" aria-selected="false"><span>01</span> 角色基准</button>
+      <button data-mode="source" data-view="original" role="tab" aria-selected="false"><span>02</span> 切割</button>
+      <button data-mode="source" data-view="processed" role="tab" aria-selected="false"><span>03</span> 调整</button>
+      <button data-mode="action" role="tab" aria-selected="true" class="active"><span>04</span> 动作</button>
+      <button id="export-open" aria-haspopup="dialog"><span>05</span> 导出 ↗</button>
     </div>
     <span id="save-status" class="save-status">工程载入中</span>
   </nav>
@@ -60,6 +60,7 @@
     <aside id="materials-pane" class="sidebar">
       <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><div class="item-actions"><button id="delete-item" class="text-button danger" hidden>删除</button><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div></div>
       <div id="item-list" class="item-list"></div>
+      <div id="sidebar-context" class="sidebar-context"></div>
       <div class="library-heading"><h2>素材库 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
       <div class="library-filters"><input id="asset-search" type="search" placeholder="搜索素材…" aria-label="搜索素材"><select id="asset-source" aria-label="筛选素材来源"><option value="">全部来源</option></select></div>
       <div class="library-selection"><label><input id="asset-multiselect" type="checkbox"> 多选</label><button id="assets-select-visible" class="text-button">全选当前结果</button><button id="assets-clear" class="text-button">清空</button></div>
@@ -70,6 +71,8 @@
 
     <div id="left-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整素材区宽度" aria-orientation="vertical" aria-controls="materials-pane"></div>
     <section id="canvas-pane" class="editor" tabindex="-1">
+      <div id="reference-board" class="reference-board" hidden></div>
+      <div id="action-navigation" class="action-navigation" hidden><button id="action-edit">动作编排</button><button id="action-review">衔接检查</button></div>
       <div class="canvas-toolbar"><div><span class="eyebrow" id="editor-kind">ACTION EDITOR</span><strong id="editor-title">—</strong></div><div class="view-controls"><label><input id="guides" type="checkbox" checked> 辅助线</label><label><input id="onion" type="checkbox"> 前帧叠图</label><label><input id="reference" type="checkbox"> Idle 参考</label><select id="background" aria-label="画布背景"><option value="checker">棋盘格</option><option value="dark">深色</option><option value="light">浅色</option></select><select id="zoom" aria-label="画布缩放"><option value="fit">适应画布</option><option value="1">100%</option><option value="0.5">50%</option><option value="2">200%</option></select></div></div>
       <div id="canvas-area" class="canvas-area">
         <span class="canvas-label" id="canvas-label">统一画布 · 固定锚点</span>
@@ -86,7 +89,7 @@
     </section>
 
     <div id="right-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整属性区宽度" aria-orientation="vertical" aria-controls="properties-pane"></div>
-    <aside id="properties-pane" class="inspector"><div class="panel-heading"><h2>属性检查器</h2><span class="eyebrow">INSPECTOR</span></div><div id="inspector-content"></div></aside>
+    <aside id="properties-pane" class="inspector"><div class="panel-heading"><h2 id="inspector-title">属性检查器</h2><span id="inspector-step" class="eyebrow"></span></div><div id="inspector-content"></div><div id="inspector-actions" class="inspector-actions"></div></aside>
   </main>
 
   <footer class="statusbar"><span id="status-message" role="status">所有素材保存在本机 · 导出时生成文件</span><span>← → 单步 <span class="divider">/</span> Space 播放 <span class="divider">/</span> Ctrl S 保存</span></footer>

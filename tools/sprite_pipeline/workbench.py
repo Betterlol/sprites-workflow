@@ -309,21 +309,23 @@ class Project:
     def fingerprint(self, cfg: Config, filename: str) -> str:
         return source_fingerprint(cfg, filename)
 
-    def render(self, data: dict, filename: str) -> tuple[Config, dict, dict, list, float]:
+    def render(self, data: dict, filename: str, stage: str = "process") -> tuple[Config, dict, dict, list, float]:
+        if stage not in {"extract", "process"}:
+            raise ValueError("Unknown preview stage")
         cfg = self.draft(data)
         if filename not in cfg.discover_sources():
             raise ValueError("Unknown source image")
         raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
         keys = preserve_slice_ids(boxes, previous_slices(cfg, filename))
         images = dict(zip(keys, raw))
-        frames, scale = process_images(cfg, filename, images)
+        frames, scale = ({f"{key}.png": image for key, image in images.items()}, 1.0) if stage == "extract" else process_images(cfg, filename, images)
         descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
         return cfg, images, frames, descriptors, scale
 
-    def preview(self, data: dict, filename: str) -> dict:
+    def preview(self, data: dict, filename: str, stage: str = "process") -> dict:
         with self.lock:
-            cfg, _raw, frames, descriptors, scale = self.render(data, filename)
-            return {"scale": scale, "frames": [
+            cfg, _raw, frames, descriptors, scale = self.render(data, filename, stage)
+            return {"stage": stage, "scale": scale, "frames": [
                 {"id": Path(item["file"]).stem, "ref": cfg.source_id(filename) + "/" + item["file"],
                  "box": item["source_box"], "url": data_url(frames[item["file"]]),
                  "bbox": frames[item["file"]].getbbox()}
