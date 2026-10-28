@@ -28,10 +28,10 @@
 
 ## Round 2: Operations and storage
 
-- [ ] Move filesystem primitives/config IO/history/locks/slices into storage; centralize config reads/writes in ConfigRepository.
-- [ ] Split Project implementation into application session, query, editing, asset and export operations through composition, retaining a small facade.
-- [ ] Move HTTP/CLI entry points into interfaces; share application operations between HTTP and projects CLI. Preserve legacy batch CLI semantics through shared stage services.
-- [ ] Test entry point equivalence and transaction failure recovery; run all required suites and commit.
+- [x] Move filesystem primitives/config IO/history/locks/slices into storage; centralize config reads/writes in ConfigRepository.
+- [x] Split Project implementation into application session, query, editing, asset and export operations through composition, retaining a small facade.
+- [x] Move HTTP/CLI entry points into interfaces; share application operations between HTTP and projects CLI. Preserve legacy batch CLI semantics through shared stage services.
+- [x] Test entry point equivalence and transaction failure recovery; run all required suites and commit.
 
 ## Round 3: Quality and contracts
 
@@ -45,3 +45,5 @@
 - Existing behavior tests serve as refactor safety net; new tests cover newly explicit service contracts and architectural constraints.
 
 - Round 1: 148 Python tests and both Node suites passed. An old tuple unpack in prepare was caught by existing job/rollback tests and changed to named RenderResult fields.
+
+- Round 2: 149 Python tests and both Node suites passed. Project now composes session/editing/assets/export operations; configuration snapshots and saves use ConfigRepository. Legacy batch process still requires saved slices, while draft previews can render in memory. Both share pixel processing and slice storage.

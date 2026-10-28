@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image
 from scipy import ndimage
-from ..domain.validation import integer
+from sprite_pipeline.domain.validation import integer
 
 def bbox(mask: np.ndarray) -> tuple[int, int, int, int]:
     ys, xs = np.where(mask)

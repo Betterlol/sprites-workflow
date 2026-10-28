@@ -4,8 +4,8 @@ import json
 import hashlib
 from dataclasses import dataclass
 from PIL import Image
-from ..domain.validation import integer, merge, positive
-from ..domain.models import CanvasSpec
+from sprite_pipeline.domain.validation import integer, merge, positive
+from sprite_pipeline.domain.models import CanvasSpec
 
 @dataclass(frozen=True)
 class ProcessResult:

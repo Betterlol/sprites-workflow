@@ -121,7 +121,7 @@ class WorkbenchTests(unittest.TestCase):
         from sprite_pipeline.workbench import data_url
         with patch('sprite_pipeline.application.rendering.cut_frames', side_effect=AssertionError('unchanged extraction was repeated')), \
                 patch('sprite_pipeline.imaging.processing.normalize', wraps=normalize) as renderer, \
-                patch('sprite_pipeline.workbench.data_url', wraps=data_url) as encoder:
+                patch('sprite_pipeline.application.editing.data_url', wraps=data_url) as encoder:
             response = self.post('preview', source='walk.png', known=versions)
             self.assertEqual(response.status_code,200,response.text)
             self.assertEqual(renderer.call_count,1)
@@ -216,7 +216,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(self.save_slices().status_code, 409)
         self.data = response.json()['data']; self.revision = response.json()['revision']
         before = {p.relative_to(self.root):p.read_bytes() for p in self.root.rglob('*') if p.is_file() and '.sprite-workbench-history' not in p.parts}
-        with patch('sprite_pipeline.workbench.write_json', side_effect=OSError('failed config')):
+        with patch('sprite_pipeline.storage.configuration.write_json', side_effect=OSError('failed config')):
             self.assertNotEqual(self.save_slices().status_code, 200)
         after = {p.relative_to(self.root):p.read_bytes() for p in self.root.rglob('*') if p.is_file() and '.sprite-workbench-history' not in p.parts}
         self.assertEqual(after, before)

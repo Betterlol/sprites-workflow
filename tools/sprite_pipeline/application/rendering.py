@@ -6,14 +6,14 @@ import hashlib
 import json
 from dataclasses import dataclass
 from PIL import Image
-from ..config import Config, inside
-from ..domain.models import CanvasSpec, SliceDescriptor
-from ..extract import previous_slices, slice_ids
-from ..imaging.extraction import cut_frames
-from ..imaging.processing import process_frames
-from ..files import read_image
-from ..slices import read_slices, extraction_fingerprint
-from ..render_cache import RenderCache
+from sprite_pipeline.storage.configuration import Config, inside
+from sprite_pipeline.domain.models import CanvasSpec, SliceDescriptor
+from sprite_pipeline.storage.identities import previous_slices, slice_ids
+from sprite_pipeline.imaging.extraction import cut_frames
+from sprite_pipeline.imaging.processing import process_frames
+from sprite_pipeline.storage.files import read_image
+from sprite_pipeline.storage.slices import read_slices, extraction_fingerprint
+from sprite_pipeline.storage.cache import RenderCache
 
 @dataclass(frozen=True)
 class RenderResult:

@@ -1,7 +1,7 @@
 """Runtime, display and review composition shared by all clients."""
-from .animation import playback
-from .validation import integer, NAME
-from .models import ActionConfig, ActionStep
+from sprite_pipeline.domain.animation import playback
+from sprite_pipeline.domain.validation import integer, NAME
+from sprite_pipeline.domain.models import ActionConfig
 
 def action_steps(cfg: ActionConfig, name: str, mode: str = "runtime") -> list[dict]:
     if name not in cfg.data["actions"]:

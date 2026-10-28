@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .validation import integer, positive
+from sprite_pipeline.domain.validation import integer, positive
 
 
 def playback(spec: dict, count: int) -> tuple[list[int], list[int], int]:

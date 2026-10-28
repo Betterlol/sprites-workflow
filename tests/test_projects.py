@@ -140,8 +140,8 @@ class ProjectWorkflowTests(unittest.TestCase):
         snapshot = self.create()
         snapshot = self.import_image(snapshot, kind="processed").json()
         url = snapshot["assets"][0]["url"]
-        with patch("sprite_pipeline.projects.load_config", wraps=load_config) as store_load, \
-             patch("sprite_pipeline.workbench.load_config", wraps=load_config) as image_load:
+        with patch("sprite_pipeline.application.projects.load_config", wraps=load_config) as store_load, \
+             patch("sprite_pipeline.storage.configuration.load_config", wraps=load_config) as image_load:
             first = self.client.get(url)
             loads_after_first = store_load.call_count + image_load.call_count
             second = self.client.get(url)
@@ -190,7 +190,7 @@ class ProjectWorkflowTests(unittest.TestCase):
                 raise AssertionError("unchanged processed image was decoded again")
             return image_open(path, *args, **kwargs)
 
-        with patch("sprite_pipeline.workbench.Image.open", side_effect=reject_redecode):
+        with patch("sprite_pipeline.application.queries.Image.open", side_effect=reject_redecode):
             self.assertEqual(self.snapshot()["assets"][0]["bbox"], [0, 0, 32, 32])
 
         old_stat = image_path.stat()
@@ -252,7 +252,7 @@ class ProjectWorkflowTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200, history.text)
         prior_versions = history.json()["versions"]
         snapshot["data"]["sources"]["walk.png"]["process"] = {"offset": [1, 0]}
-        with patch("sprite_pipeline.workbench.write_json", side_effect=OSError("config write failed")):
+        with patch("sprite_pipeline.storage.configuration.write_json", side_effect=OSError("config write failed")):
             with self.assertRaisesRegex(OSError, "config write failed"):
                 self.store.get("fish").apply(snapshot["data"], snapshot["revision"], "walk.png", snapshot["asset_revision"])
         self.assertEqual(processed.read_bytes(), original)
@@ -472,7 +472,7 @@ class ProjectWorkflowTests(unittest.TestCase):
         snapshot = self.import_image(snapshot, kind="source", filename="walk.png").json()
         snapshot = self.post("apply", snapshot, source="walk.png").json()
         snapshot["data"]["sources"]["walk.png"]["process"] = {"offset": [1, 0]}
-        with patch("sprite_pipeline.workbench.write_json", side_effect=OSError("config write failed")), \
+        with patch("sprite_pipeline.storage.configuration.write_json", side_effect=OSError("config write failed")), \
              patch.object(ProjectHistory, "_restore_archive", side_effect=OSError("rollback failed")):
             with self.assertRaisesRegex(OSError, "backup"):
                 self.store.get("fish").apply(snapshot["data"], snapshot["revision"], "walk.png", snapshot["asset_revision"])
@@ -482,7 +482,7 @@ class ProjectWorkflowTests(unittest.TestCase):
 
     def test_unchanged_project_requests_reuse_validation_but_external_edits_refresh(self):
         first = self.create()
-        with patch("sprite_pipeline.projects.load_config", side_effect=AssertionError("config was revalidated")):
+        with patch("sprite_pipeline.application.projects.load_config", side_effect=AssertionError("config was revalidated")):
             repeat = self.snapshot()
             changes = self.client.get("/api/projects/fish/changes")
         self.assertEqual(repeat["revision"], first["revision"])
@@ -769,7 +769,7 @@ class ProjectWorkflowTests(unittest.TestCase):
             if path == project.path:
                 raise OSError("simulated config write failure")
             write_json(path, data)
-        with patch("sprite_pipeline.workbench.write_json", side_effect=failing_write):
+        with patch("sprite_pipeline.storage.configuration.write_json", side_effect=failing_write):
             with self.assertRaisesRegex(OSError, "simulated"):
                 project.delete("processed", ["pose/000.png"], snapshot["data"], snapshot["revision"], snapshot["asset_revision"])
         after = {p.relative_to(project.path.parent): p.read_bytes() for p in project.path.parent.rglob("*") if p.is_file()}
