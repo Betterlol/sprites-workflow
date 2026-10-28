@@ -27,6 +27,7 @@ except ImportError:
 from sprite_pipeline.config import load_config
 from sprite_pipeline.extract import extract_source
 from sprite_pipeline.process import process_source
+from sprite_pipeline.process import normalize
 from sprite_pipeline.workbench import Project, action_steps, png_bytes, preserve_slice_ids, review_steps
 
 
@@ -112,6 +113,54 @@ class WorkbenchTests(unittest.TestCase):
 
     def test_preview_rejects_unknown_stage(self):
         self.assertEqual(self.post('preview', source='walk.png', stage='unknown').status_code, 400)
+
+    def test_single_override_renders_and_transmits_only_changed_frame(self):
+        first = self.post('preview', source='walk.png').json()
+        versions = {frame['ref']:frame.get('version','') for frame in first['frames']}
+        self.data['sources']['walk.png']['process'] = {'overrides':{'001':{'offset':[1,-2]}}}
+        from sprite_pipeline.workbench import data_url
+        with patch('sprite_pipeline.workbench.cut_frames', side_effect=AssertionError('unchanged extraction was repeated')), \
+                patch('sprite_pipeline.process.normalize', wraps=normalize) as renderer, \
+                patch('sprite_pipeline.workbench.data_url', wraps=data_url) as encoder:
+            response = self.post('preview', source='walk.png', known=versions)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(renderer.call_count,1)
+            self.assertEqual(encoder.call_count,1)
+        result = response.json()
+        self.assertEqual([frame['id'] for frame in result['frames'] if 'url' in frame],['001'])
+        self.assertEqual(result['frames'][1]['bbox'],[5,4,13,12])
+        self.assertEqual(result['frames'][0]['version'],versions['walk/000.png'])
+
+    def test_incremental_apply_preserves_other_png_bytes_and_mtimes(self):
+        self.apply()
+        files = [self.root/f'processed_sprites/walk/{index:03d}.png' for index in range(3)]
+        before = [(path.read_bytes(),path.stat().st_mtime_ns) for path in files]
+        self.data['sources']['walk.png']['process'] = {'overrides':{'001':{'offset':[1,-2]}}}
+        self.apply()
+        for index in (0,2):
+            self.assertEqual((files[index].read_bytes(),files[index].stat().st_mtime_ns),before[index])
+        self.assertNotEqual(files[1].read_bytes(),before[1][0])
+
+    def test_group_and_canvas_changes_invalidate_all_frame_recipes(self):
+        self.post('preview',source='walk.png')
+        self.data['sources']['walk.png']['process'] = {'scale':0.75}
+        with patch('sprite_pipeline.process.normalize',wraps=normalize) as renderer:
+            self.assertEqual(self.post('preview',source='walk.png').status_code,200)
+            self.assertEqual(renderer.call_count,3)
+        self.data['frame_size']=[20,20]
+        with patch('sprite_pipeline.process.normalize',wraps=normalize) as renderer:
+            self.assertEqual(self.post('preview',source='walk.png').status_code,200)
+            self.assertEqual(renderer.call_count,3)
+
+    def test_fit_height_incremental_render_keeps_group_scale(self):
+        self.data['sources']['walk.png']['process']={'fit_height':4,'max_scale':2}
+        self.post('preview',source='walk.png')
+        self.data['sources']['walk.png']['process']['overrides']={'002':{'offset':[1,0]}}
+        with patch('sprite_pipeline.process.normalize',wraps=normalize) as renderer:
+            result = self.post('preview',source='walk.png').json()
+            self.assertEqual(renderer.call_count,1)
+        self.assertEqual(result['scale'],0.5)
+        self.assertEqual(result['frames'][2]['bbox'],[7,10,11,14])
 
     def save_slices(self, extract=None):
         return self.post('save-slices', source='walk.png', extract=extract or self.data['sources']['walk.png']['extract'])

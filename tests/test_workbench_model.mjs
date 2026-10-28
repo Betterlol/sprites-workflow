@@ -123,3 +123,18 @@ assert.deepEqual(slicing.hitRegion([[10,10,30,30]],0,[30,30],2),{index:0,handle:
 assert.deepEqual(slicing.hitRegion([[10,10,30,30]],0,[20,20],2),{index:0,handle:'move'});
 assert.equal(slicing.hitRegion([[10,10,30,30]],0,[40,40],2),null);
 console.log('Workbench model: timing, review boundaries, display remapping and slice geometry passed.');
+
+const adjustmentText = await readFile(new URL('../tools/sprite_pipeline/web/adjustment.js',import.meta.url),'utf8');
+const adjustment = await import('data:text/javascript;base64,' + Buffer.from(adjustmentText).toString('base64'));
+const ordered = [{ref:'a/001.png',duration_ms:83,frame:0},{ref:'b/000.png',duration_ms:125,frame:1},{ref:'a/001.png',duration_ms:42,frame:2}];
+const previewFrames = [{ref:'a/001.png',id:'001',url:'draft-a',version:'new'}];
+const adjusted = adjustment.composeAdjustmentSteps(ordered,previewFrames,[{ref:'b/000.png',url:'saved-b'}]);
+assert.deepEqual(adjusted.map(step=>[step.ref,step.duration_ms,step.url]),[['a/001.png',83,'draft-a'],['b/000.png',125,'saved-b'],['a/001.png',42,'draft-a']]);
+const merged = adjustment.mergePreviewFrames({frames:[{ref:'a',version:'1',url:'old'},{ref:'b',version:'3',url:'b-old'}]},
+  {frames:[{ref:'a',version:'1'},{ref:'b',version:'4',url:'b-new'}]});
+assert.equal(merged.frames[0].url,'old'); assert.equal(merged.frames[1].url,'b-new');
+assert.throws(()=>adjustment.mergePreviewFrames({frames:[]},{frames:[{ref:'a',version:'1'}]}));
+player.index=1; player.elapsed=37; player.last=200; player.playing=true;
+player.updateSteps(player.steps.map((step,i)=>i===1 ? {...step,url:'/changed'} : step));
+assert.equal(player.index,1); assert.equal(player.elapsed,37); assert.equal(player.playing,true);
+console.log('Adjustment model: ordered repeats, cross-source frames, delta merge and uninterrupted playback passed.');

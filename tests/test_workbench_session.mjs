@@ -89,6 +89,7 @@ class Player {
   draw() {}
   setProject(data) { this.size = data.frame_size; this.anchor = data.anchor.pixels; }
   setSteps(steps,index = 0) { this.steps = steps; this.index = index; this.onStep(index); }
+  updateSteps(steps) { this.steps = steps; this.onStep(this.index); }
   seek(index) { this.index = index; this.onStep(index); }
 }
 const snapshot = id => ({data:{version:2,project:{name:id},character:id,frame_size:[32,32],anchor:{x:0.5,y:0.90625,pixels:[16,29]},defaults:{},sources:{},actions:{},workbench:{reviews:{}}},
@@ -170,6 +171,13 @@ const context = {
         if (body.source === 'drag.png' && holdDragPreview) await new Promise(resolve => { releaseDragPreview = resolve; });
         result = {stage:body.stage || 'process',scale:1,frames:[{id:'000',ref:body.source.replace('.png','/000.png'),box:[0,0,8,8],url:'/preview/' + body.source,bbox:[0,0,8,8]}]};
         if (body.source === 'drag.png') result.frames = ['000','001'].map(id => ({id,ref:`drag/${id}.png`,box:[0,0,8,8],url:`/preview/drag-${id}`,bbox:[4,5,14,17]}));
+        const process = body.data.sources?.[body.source]?.process || {};
+        const base = {...process}; delete base.overrides;
+        result.frames.forEach(frame=>{
+          frame.version=JSON.stringify([body.stage,body.data.frame_size,base,process.overrides?.[frame.id]]);
+          frame.url+='?v='+encodeURIComponent(frame.version);
+          if (body.known?.[frame.ref] === frame.version) delete frame.url;
+        });
       }
       else if (operation === 'apply') {
         const payload = JSON.parse(options.body);
@@ -192,6 +200,8 @@ try { layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout
 if (layoutSource) Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64')));
 const slicingModule = await readFile(new URL('../tools/sprite_pipeline/web/slicing.js',import.meta.url),'utf8');
 Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(slicingModule).toString('base64')));
+const adjustmentModule = await readFile(new URL('../tools/sprite_pipeline/web/adjustment.js',import.meta.url),'utf8');
+Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(adjustmentModule).toString('base64')));
 source = source.replace(/^import [^\r\n]*\r?\n/gm,'');
 source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,saveSlices:typeof saveSlices === "function" ? saveSlices : save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';
 vm.runInNewContext(source,context,{filename:'app.js'});
@@ -693,3 +703,30 @@ state.data.sources['workflow.png'].extract = savedExtract;
 await showProjects();
 assert.equal(state.data,null);
 assert.equal(state.preview,null,'Returning home releases the previous preview before updating status');
+
+await openProject('alpha');
+state.sources = [{file:'drag.png',url:'/source/drag',size:[32,16],count:2},{file:'other.png',url:'/source/other',size:[8,8],count:1}];
+state.source = 'drag.png';
+state.data.sources = {'drag.png':{extract:{method:'grid',cols:2,rows:1}},'other.png':{extract:{method:'image'}}};
+state.data.actions = {motion:{fps:16,sprites:['drag/001.png','other/000.png','drag/001.png','drag/000.png'],animation:{order:[3,0],durations_ms:[40,120]}}};
+state.action = 'motion'; mode('source','processed'); await context.hooks.previewSource();
+assert.deepEqual(activeSteps().map(step=>step.ref),state.data.actions.motion.sprites,'Adjustment keeps actual action order and duplicate slots');
+assert(activeSteps().every(step=>step.duration_ms===62),'Adjustment uses runtime FPS rather than fixed 100ms');
+assert(activeSteps().every(step=>!!step.url),'All sources in the action get preview pixels');
+state.selected = 2; renderAll(); player.index = 1; player.elapsed = 31; player.playing = true;
+state.data.sources['drag.png'].process = {overrides:{'001':{offset:[2,0]}}};
+await context.hooks.previewSource();
+assert.equal(state.selected,2,'Duplicate action slot selection is not clamped to source frame count');
+assert.equal(player.index,1,'Pixel refresh does not jump back to the edited slot');
+assert.equal(player.elapsed,31); assert(player.playing);
+assert.equal(activeSteps()[0].url,activeSteps()[2].url,'Repeated references use the same adjusted pixels');
+console.log('Adjustment session: action order, exact runtime timing, cross-source preview and playback continuity passed.');
+elements.get('adjust-playback').value='display'; elements.get('adjust-playback').onchange();
+await context.hooks.previewSource();
+assert.deepEqual(activeSteps().map(step=>[step.ref,step.duration_ms]),[['drag/000.png',40],['drag/001.png',120]]);
+state.source='other.png'; state.adjustPlaybackMode='runtime'; mode('source','processed');
+await context.hooks.previewSource();
+assert.equal(activeSteps()[state.selected].ref,'other/000.png','Entering adjustment from a source selects its actual action slot');
+state.playbackMode='runtime'; state.action='motion'; mode('action'); state.selected=2; renderAll();
+elements.get('locate-source').dispatch('click',{});
+assert.equal(state.adjustAction,'motion'); assert.equal(state.selected,2,'Locate-source keeps the selected repeated action slot');

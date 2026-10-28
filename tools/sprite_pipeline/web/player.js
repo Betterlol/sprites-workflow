@@ -59,6 +59,17 @@ export class Player {
     const step = this.steps[index];
     return step ? this.image(step.url || this.assets?.get(step.ref)?.url) : null;
   }
+  updateSteps(steps) {
+    const sameSequence = this.steps.length === steps.length && this.steps.every((step,i)=>
+      step.ref === steps[i].ref && step.duration_ms === steps[i].duration_ms);
+    if (!sameSequence) { this.setSteps(steps,this.index); return; }
+    this.steps = steps;
+    const epoch = ++this.loadEpoch;
+    this.prefetch(this.index);
+    this.waitForCurrent(epoch);
+    this.onStep(this.index);
+    this.draw();
+  }
   prefetch(index) {
     for (let offset = 0; offset < Math.min(8, this.steps.length); offset++) {
       const next = index + offset;

@@ -26,7 +26,24 @@ def write_json(path: Path, payload: dict) -> None:
         staged.replace(path)
 
 
-def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, owned: str, metadata: dict) -> None:
+def frame_changes(directory: Path, frames: dict[str, Image.Image], owned: str) -> tuple[set[str], list[Path]]:
+    changed = set()
+    for name, image in frames.items():
+        try:
+            previous = read_image(directory / name)
+            if previous.size != image.size or previous.tobytes() != image.tobytes():
+                changed.add(name)
+        except (OSError, ValueError):
+            changed.add(name)
+    stage = directory / '_stage.json'
+    old_names = json.loads(stage.read_text(encoding='utf-8')).get('files', []) if stage.exists() else []
+    removed = [path for path in directory.glob('*.png') if path.name not in frames
+               and (re.fullmatch(owned, path.name) or path.name in old_names)]
+    return changed, removed
+
+
+def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, owned: str, metadata: dict,
+                   write_names: set[str] | None = None) -> None:
     """Render/validate everything before replacing owned PNGs for one item.
 
     Extra review notes and images with unrelated names are left alone. This is
@@ -36,6 +53,8 @@ def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, ow
     with TemporaryDirectory(prefix=".sprite-frames-", dir=directory.parent) as temporary:
         staged = Path(temporary)
         for name, frame in frames.items():
+            if write_names is not None and name not in write_names:
+                continue
             if isinstance(frame, Path):
                 shutil.copyfile(frame, staged / name)
             else:

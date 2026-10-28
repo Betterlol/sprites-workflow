@@ -151,7 +151,7 @@ def create_app(config_path: Path | None = None, workspace_root: Path | None = No
         if operation == "save":
             return project.save(data, revision)
         if operation == "preview":
-            return project.preview(data, payload["source"], payload.get("stage", "process"))
+            return project.preview(data, payload["source"], payload.get("stage", "process"), payload.get('known'))
         if operation == "apply":
             return project.apply(data, revision, payload["source"], assets)
         if operation == "prepare":

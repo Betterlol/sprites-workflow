@@ -3,6 +3,7 @@ import {mergeDraft, resolveMerge, conflictKey} from './merge.js';
 import {clampPanel, clampTimeline, savedSize} from './layout.js';
 import {Player} from './player.js';
 import {resizeRegion, hitRegion, manualExtraction} from './slicing.js';
+import {composeAdjustmentSteps, mergePreviewFrames, sourceForFrame} from './adjustment.js';
 
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -22,6 +23,9 @@ let regionDrag = null;
 let sliceTool = 'select';
 const sliceAllocations = new Map();
 const previewCache = new Map();
+const processedPreviews = new Map();
+state.adjustAction = '';
+state.adjustPlaybackMode = 'runtime';
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
 const LAYOUT_KEY = 'sprite-workbench-layout';
@@ -170,6 +174,9 @@ function checkpoint() {
 }
 function change(operation, {render = true, preview = false} = {}) {
   checkpoint(); operation(); reconcileReviewRanges(state.data); state.previewEpoch++;
+  if (state.mode === 'source' && state.sourceView === 'processed' && preview) {
+    schedulePreview(); if (render) renderInspector(); updateSaveStatus(); return;
+  }
   if (state.mode === 'source' && preview) { state.preview = null; state.previewKey = null; schedulePreview(); }
   if (render) renderAll(); else updateSaveStatus();
 }
@@ -231,6 +238,7 @@ async function openProject(projectId) {
     const snapshot = await api('projects/' + encodeURIComponent(projectId));
     clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
     player.reset(); state.projectId = projectId;
+    processedPreviews.clear(); state.adjustAction = ''; state.adjustPlaybackMode = 'runtime';
     state.action = null; state.source = null; state.review = null; state.reference = null; state.selected = 0; state.clip = 0;
     state.assetSelection.clear(); state.libraryMulti = false; state.lastAsset = null;
     state.mode = snapshot.sources.length ? 'source' : snapshot.assets.length ? 'action' : 'reference';
@@ -250,6 +258,7 @@ async function showProjects() {
   await task('正在读取工程…',async () => {
     await listProjects(); clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
     player.reset(); state.data = null; state.saved = null; state.savedData = null; state.projectId = null;
+    processedPreviews.clear();
     previewRequest?.controller.abort(); previewRequest = null;
     state.preview = null; state.previewSource = null; state.previewKey = null; state.source = null;
     state.externalChange = false; $('#external-change').hidden = true;
@@ -392,6 +401,7 @@ function mode(value, sourceView = 'processed') {
   }
   if (value === 'source') state.sourceView = sourceView;
   state.mode = value; state.selected = 0; state.clip = 0; player.pause();
+  if (value === 'source' && sourceView === 'processed') chooseAdjustmentAction();
   clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
   if (value === 'source') schedulePreview(); renderAll();
 }
@@ -402,6 +412,7 @@ function renderAll() {
   $('#project-name').textContent = state.data.project?.name || state.data.character;
   const actionNames = Object.keys(state.data.actions);
   if (!state.data.actions[state.action]) state.action = actionNames[0];
+  if (!state.data.actions[state.adjustAction]) state.adjustAction = '';
   if (!reviews()[state.review]) state.review = Object.keys(reviews())[0];
   document.querySelectorAll('button[data-mode]').forEach(button => {
     const active = (button.dataset.mode === state.mode || button.dataset.mode === 'action' && state.mode === 'review') && (!button.dataset.view || button.dataset.view === state.sourceView);
@@ -431,6 +442,11 @@ function renderWorkflow() {
   $('#timeline-help').textContent = state.mode === 'source' ? slicing ? '选择 / 移动 · 拖动边角缩放 · 方向键微移 · Esc 取消' : '拖动当前帧调整位置 · 应用后同步到动作' : $('#timeline-help').textContent;
   $('#reference-board').hidden = state.mode !== 'reference';
   $('#slice-tools').hidden = !slicing;
+  $('#adjustment-context').hidden = state.mode !== 'source' || slicing;
+  $('#adjust-action').innerHTML = '<option value="">素材检查（非动作编排）</option>' + Object.keys(state.data.actions).map(name=>`<option value="${escape(name)}" ${name === state.adjustAction ? 'selected' : ''}>${escape(name)}</option>`).join('');
+  $('#adjust-playback').value = state.adjustPlaybackMode;
+  $('#adjust-context-note').textContent = state.adjustAction ? '按动作完整顺序播放 · 重复素材同步更新' : `原帧顺序 · ${state.data.defaults?.fps || 12} FPS`;
+  if (state.mode === 'source' && !slicing) $('#timeline-title').textContent = state.adjustAction ? `${state.adjustAction} · ${state.adjustPlaybackMode === 'runtime' ? '游戏播放' : '展示播放'}` : '素材检查 · 非动作编排';
   $('#slice-select').classList.toggle('active',sliceTool === 'select');
   $('#slice-create').classList.toggle('active',sliceTool === 'create');
   $('#action-navigation').hidden = !['action','review'].includes(state.mode);
@@ -456,7 +472,7 @@ function renderItems() {
   $('#item-list').querySelectorAll('[data-item]').forEach(button => {
     button.onclick = () => {
       state[state.mode] = button.dataset.item; state.selected = 0; state.clip = 0; player.pause();
-      if (state.mode === 'source') { state.preview = null; state.previewKey = null; state.previewError = null; state.previewEpoch++; schedulePreview(); }
+      if (state.mode === 'source') { state.preview = null; state.previewKey = null; state.previewError = null; state.previewEpoch++; if (state.sourceView === 'processed') chooseAdjustmentAction(); schedulePreview(); }
       renderAll(); showPane('canvas',true);
     };
     if (state.mode === 'action') {
@@ -513,6 +529,15 @@ function addAssets(references, at) {
 function activeSteps() {
   if (state.mode === 'reference') return [];
   if (state.mode === 'source') {
+    if (state.sourceView === 'processed') {
+      const available = adjustmentFrames();
+      const order = state.adjustAction && state.data.actions[state.adjustAction]
+        ? actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode)
+        : (state.preview?.stage === 'process' && state.previewSource === state.source ? state.preview.frames : state.assets.filter(frame=>sourceForFrame(state.sources,frame.ref)?.file === state.source))
+          .map((frame,index)=>({ref:frame.ref,frame:index,duration_ms:Math.max(1,roundMs(1000/(state.data.defaults?.fps || 12)))}));
+      const offsets = Object.fromEntries(Object.entries(state.previewOffsets).map(([id,value])=>[state.source?.replace(/\.[^.]+$/,'')+'/'+id+'.png',value]));
+      return composeAdjustmentSteps(order,available,state.assets,offsets);
+    }
     if (state.preview && state.previewSource === state.source) return state.preview.frames.map((frame, i) => ({...frame, frame:i, duration_ms:100,
       ...(state.previewOffsets[frame.id] ? {previewOffset:state.previewOffsets[frame.id]} : {})}));
     if (state.sourceView === 'original') return [];
@@ -521,6 +546,30 @@ function activeSteps() {
   }
   if (state.mode === 'action') return state.action ? actionSteps(state.data, state.action, state.playbackMode) : [];
   return currentReview() ? reviewSteps(state.data, currentReview()) : [];
+}
+function chooseAdjustmentAction() {
+  const names=Object.keys(state.data.actions).filter(name=>frames(state.data.actions[name]).some(ref=>sourceForFrame(state.sources,ref)?.file === state.source));
+  state.adjustAction = names.includes(state.adjustAction) ? state.adjustAction : names.includes(state.action) ? state.action : names[0] || '';
+  if (!state.source && state.data.actions[state.action]) state.adjustAction = state.action;
+  if (state.adjustAction) $('#loop-preview').checked = !!merge(state.data.defaults,state.data.actions[state.adjustAction]).loop;
+  if (state.adjustAction) state.selected = Math.max(0,actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode).findIndex(step=>sourceForFrame(state.sources,step.ref)?.file === state.source));
+}
+function adjustmentFrames() {
+  const result=[];
+  for (const [source,entry] of processedPreviews) {
+    if (entry.key === previewKey(source,'processed')) result.push(...entry.result.frames);
+  }
+  // Keep the last visible pixels while a newer recipe is computing.
+  if (state.preview?.stage === 'process' && state.previewSource === state.source) result.push(...state.preview.frames);
+  return result;
+}
+function selectAdjustmentStep(index) {
+  const step=activeSteps()[index], owner=sourceForFrame(state.sources,step?.ref);
+  state.selected=index;
+  if (owner && owner.file !== state.source) {
+    state.source=owner.file; state.preview=null; state.previewKey=null; state.previewError=null; state.previewOffsets={};
+    state.previewEpoch++; schedulePreview();
+  }
 }
 function refreshPlayer({seek = true} = {}) {
   player.sourceView = null; player.setProject(state.data, state.assets);
@@ -539,6 +588,7 @@ function refreshPlayer({seek = true} = {}) {
     $('#canvas-label').textContent = `${state.data.frame_size.join(' × ')} · 固定锚点 (${state.data.anchor.pixels.join(', ')})`;
   }
   if (seek) player.setSteps(steps, state.mode === 'review' ? Math.min(player.index, Math.max(0,steps.length - 1)) : state.selected);
+  else player.updateSteps(steps);
   $('#stage').classList.toggle('frame-movable',canDragFrame());
   $('#empty-canvas').hidden = steps.length > 0 || !!player.sourceView;
   const missing = steps.filter(step => !step.url && !asset(step.ref));
@@ -547,7 +597,7 @@ function refreshPlayer({seek = true} = {}) {
   $('#total-time').textContent = (steps.reduce((sum, step) => sum + step.duration_ms, 0) / 1000).toFixed(2) + 's';
   $('#timeline-stats').textContent = `${steps.length} FRAMES`;
   $('#play').textContent = player.playing ? 'Ⅱ' : '▶';
-  $('#play').disabled = !steps.length || !!player.sourceView;
+  $('#play').disabled = !steps.length || !!player.sourceView || (state.mode === 'source' && state.sourceView === 'processed' && steps.some(step=>!step.url));
   player.loop = $('#loop-preview').checked;
 }
 function onStep(index) {
@@ -567,7 +617,7 @@ function renderTimeline() {
     const first = actionSteps(state.data,clip.action,currentReview().mode)[clip.start || 0];
     return {index, ref:first?.ref, caption:`${clip.repeat}× · ${clip.start || 0}–${clip.end ?? 'END'}`,name:clip.action};
   }) : steps.map((step,index) => ({...step,index,caption:state.mode === 'source' && state.sourceView === 'original' ? `${step.box?.[2]-step.box?.[0]} × ${step.box?.[3]-step.box?.[1]}` : `${step.duration_ms} ms`}));
-  timeline.innerHTML = cards.map(card => `<button class="timeline-card ${state.mode === 'review' ? 'clip' : ''} ${card.index === (state.mode === 'review' ? state.clip : state.selected) ? 'selected' : ''}" data-index="${card.index}" draggable="${state.mode !== 'source'}" title="${escape(card.ref || card.name)}">${state.mode === 'review' ? `<span class="clip-name">${escape(card.name)}</span>` : ''}${card.url || asset(card.ref)?.url ? `<img src="${escape(card.url || asset(card.ref).url)}" alt="${escape(card.ref)}">` : '<span style="height:73px;padding:20px;color:#ef9292">缺失</span>'}<span class="frame-caption"><span>${state.mode === 'source' ? String(card.index + 1).padStart(2,'0') : String(card.index).padStart(3,'0')}</span><span>${escape(card.caption)}</span></span></button>`).join('') || '<div class="timeline-empty">将素材或动作拖到这里，开始编排 →</div>';
+  timeline.innerHTML = cards.map(card => `<button class="timeline-card ${state.mode === 'review' ? 'clip' : ''} ${card.index === (state.mode === 'review' ? state.clip : state.selected) ? 'selected' : ''}" data-index="${card.index}" data-ref="${escape(card.ref || '')}" data-duration="${card.duration_ms || 0}" draggable="${state.mode !== 'source'}" title="${escape(card.ref || card.name)}">${state.mode === 'review' ? `<span class="clip-name">${escape(card.name)}</span>` : ''}${card.url || asset(card.ref)?.url ? `<img src="${escape(card.url || asset(card.ref).url)}" alt="${escape(card.ref)}">` : '<span style="height:73px;padding:20px;color:#ef9292">缺失</span>'}<span class="frame-caption"><span>${state.mode === 'source' ? String(card.index + 1).padStart(2,'0') : String(card.index).padStart(3,'0')}</span><span>${escape(card.caption)}</span></span></button>`).join('') || '<div class="timeline-empty">将素材或动作拖到这里，开始编排 →</div>';
   timeline.scrollLeft = scrollLeft;
   const tools = state.mode === 'reference' ? '' : state.mode === 'source' ? '<button id="source-preview">刷新预览</button>' : state.mode === 'action' ? '<button id="duplicate-frame">重复帧</button><button id="reverse-frames">倒序</button><button id="remove-frame">移除</button>' : '<button id="add-clip">＋ 动作片段</button><button id="remove-clip">移除</button>';
   $('#timeline-tools').innerHTML = tools;
@@ -576,8 +626,9 @@ function renderTimeline() {
       const index = Number(card.dataset.index); player.pause();
       if (state.mode === 'review') {
         state.clip = index; player.seek(Math.max(0,steps.findIndex(step => step.clip === index)));
-      } else { state.selected = index; player.seek(index); }
+      } else { if (state.mode === 'source' && state.sourceView === 'processed') selectAdjustmentStep(index); else state.selected = index; player.seek(index); }
       renderInspector(); renderTimeline(); onStep(player.index); if (player.sourceView) { player.sourceView.selected = index; player.draw(); }
+      if (state.mode === 'source' && state.sourceView === 'processed') { renderItems(); renderWorkflow(); }
     };
     card.ondragstart = event => event.dataTransfer.setData('application/x-timeline', card.dataset.index);
     card.ondragover = event => event.preventDefault();
@@ -718,10 +769,11 @@ function bindActionInspector() {
   });
   $('#reset-display')?.addEventListener('click', () => change(() => { delete currentAction().animation; }));
   $('#locate-source')?.addEventListener('click', () => {
-    const ref = activeSteps()[state.selected]?.ref;
-    const source = state.sources.find(s => ref?.startsWith(s.file.replace(/\.[^.]+$/,'') + '/'));
+    const slot = state.selected, ref = activeSteps()[slot]?.ref;
+    const source = sourceForFrame(state.sources,ref);
     if (!source) { toast('此帧是已确认或导入的独立素材，可直接在外部修图后重新导入'); return; }
-    state.source = source.file; mode('source');
+    state.source = source.file; state.adjustAction = state.action; state.adjustPlaybackMode = state.playbackMode;
+    mode('source'); state.selected = slot; renderAll();
   });
   $('#delete-action').onclick = () => deleteSequence('action');
 }
@@ -779,6 +831,8 @@ function sourceInspector() {
   const {extract,process} = resolvedSource(), slice = state.sourceView === 'original' ? regionFrames()[state.selected] : selectedSlice();
   const override = process.overrides?.[slice?.id] || {};
   const error = state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '';
+  if (state.sourceView === 'processed' && slice && sourceForFrame(state.sources,slice.ref)?.file !== state.source)
+    return error + section('只读素材',info('引用',slice.ref) + '<p class="hint">此帧没有可直接调整的原图切片。可以播放对照，选择有原图的帧后再调整。</p>');
   if (state.sourceView === 'original') {
     const method = extract.method || 'components';
     const methods = [['components','自动识别'],['grid','规则网格'],['boxes','手动区域'],['image','整张单帧']];
@@ -799,7 +853,7 @@ function sourceInspector() {
       info('实际组缩放',state.preview?.scale?.toFixed(4) || '预览后显示') +
       `<details><summary>边界与高级设置</summary><label class="field-inline">最大自适应倍率${number('process-max-scale',process.max_scale ?? 1,'min="0.01" max="10" step="0.05"')}</label><label class="field-inline">垂直限制在画布内<input id="process-clamp" type="checkbox" ${process.clamp_y ? 'checked' : ''}></label><label class="field-inline">边缘留白${number('process-padding',process.padding ?? 0,'min="0"')}</label><label class="field-inline">越界处理<select id="process-overflow"><option value="error" ${process.overflow !== 'clip' ? 'selected' : ''}>提示错误</option><option value="clip" ${process.overflow === 'clip' ? 'selected' : ''}>允许裁切</option></select></label><p class="hint">目标高度按整组最高轮廓计算，不逐帧拉成同高。</p></details>`) +
     `<details class="advanced-rules"><summary>高级处理规则</summary><textarea id="process-json" rows="7">${escape(JSON.stringify(process,null,2))}</textarea><button id="apply-process-json" class="wide">更新处理规则</button></details>` +
-    '<div class="inspector-next"><button id="apply-source" class="primary wide">应用调整并保存工程</button><p class="hint">更新当前原图的整组素材，并保存工程草稿。动作播放使用已应用的结果。</p><div class="boundary-controls"><button id="view-original">← 返回切割</button><button id="next-actions">编排动作 →</button></div></div>';
+    '<div class="inspector-next"><button id="apply-source" class="primary wide">应用调整并保存工程</button><p class="hint">只写入变化的帧，并保存整个工程草稿。动作页与导出使用已应用结果。</p><div class="boundary-controls"><button id="view-original">← 返回切割</button><button id="next-actions">编排动作 →</button></div></div>';
 }
 function bindSourceInspector() {
   if (!state.source) return;
@@ -861,50 +915,99 @@ function bindSourceInspector() {
     const overrides = clone(resolvedSource().process.overrides || {}); delete overrides[selectedSlice().id]; setProcess('overrides',overrides);
   },opts));
   if ($('#apply-source')) $('#apply-source').onclick = () => task('正在应用处理并保存工程…',async () => {
-    const snapshot = await api('apply',payload({source:state.source})); setSnapshot(snapshot); toast('已更新 processed 素材和工程配置'); await previewSource();
+    const snapshot = await api('apply',payload({source:state.source}));
+    const playback={index:player.index,elapsed:player.elapsed,playing:player.playing};
+    setSnapshot(snapshot); player.seek(playback.index); player.elapsed=playback.elapsed; player.playing=playback.playing;
+    toast('已更新变化的帧并保存工程'); await previewSource();
   });
 }
 function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(() => previewSource(),350); }
-function previewKey(source) {
-  return JSON.stringify([state.projectId, source, state.sourceView, sourceInfo()?.url, state.assetRevision,
+function previewKey(source, view = state.sourceView) {
+  return JSON.stringify([state.projectId, source, view, state.sources.find(item=>item.file === source)?.url, state.assetRevision,
     state.data.frame_size, state.data.anchor, state.data.defaults?.extract, state.data.defaults?.process,
     state.data.sources?.[source]]);
+}
+function previewKnown(result) {
+  return Object.fromEntries((result?.frames || []).filter(frame=>frame.url && frame.version).map(frame=>[frame.ref,frame.version]));
+}
+function rememberPreview(key,result) {
+  previewCache.delete(key); previewCache.set(key,result);
+  if (previewCache.size > 4) previewCache.delete(previewCache.keys().next().value);
+}
+function patchAdjustmentTimeline() {
+  const steps=activeSteps(), cards=[...$('#timeline').querySelectorAll('[data-index]')];
+  if (cards.length !== steps.length || cards.some((card,i)=>card.dataset.ref !== steps[i].ref || Number(card.dataset.duration) !== steps[i].duration_ms)) {
+    renderTimeline(); return;
+  }
+  cards.forEach((card,i)=>{
+    const image=card.querySelector('img');
+    if (!image && steps[i].url) { renderTimeline(); return; }
+    if (image && image.getAttribute('src') !== steps[i].url) image.setAttribute('src',steps[i].url || '');
+    card.classList.toggle('selected',i === state.selected);
+  });
+}
+function refreshAdjustment() {
+  const editingField = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) && $('#inspector-content').contains?.(document.activeElement);
+  if (!editingField) renderInspector();
+  patchAdjustmentTimeline(); refreshPlayer({seek:false}); updateSaveStatus();
 }
 function showPreview(result, source, key) {
   const selectedId = state.sourceView === 'original' ? regionFrames()[state.selected]?.id : null;
   sliceAllocations.set(state.projectId + '/' + source,Math.max(sliceAllocations.get(state.projectId + '/' + source) || 0,result.next_id || 0));
+  if (result.stage === 'process') processedPreviews.set(source,{key,result});
   state.preview = result; state.previewSource = source; state.previewKey = key; state.previewError = null; state.previewOffsets = {};
   if (selectedId && result.frames.some(frame=>frame.id === selectedId)) state.selected = result.frames.findIndex(frame=>frame.id === selectedId);
-  state.selected = Math.min(state.selected,Math.max(0,result.frames.length - 1));
-  if (state.mode === 'source') { renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus(); }
-  $('#status-message').textContent = result.stage === 'extract' ? `切割预览：${result.frames.length} 帧 · 原始尺寸 · 未改写素材` : `调整预览：${result.frames.length} 帧 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
+  state.selected = Math.min(state.selected,Math.max(0,activeSteps().length - 1));
+  if (state.mode === 'source') {
+    if (state.sourceView === 'processed') refreshAdjustment();
+    else { renderInspector(); renderTimeline(); refreshPlayer(); updateSaveStatus(); }
+  }
+  $('#status-message').textContent = result.stage === 'extract' ? `切割预览：${result.frames.length} 帧 · 原始尺寸 · 未改写素材` : `调整预览已更新 · 整组倍率 ${result.scale.toFixed(4)} · 尚未应用`;
+}
+async function prepareActionPreviews(epoch) {
+  if (!state.adjustAction || !state.data.actions[state.adjustAction] || state.sourceView !== 'processed') return;
+  const sources=[...new Set(actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode).map(step=>sourceForFrame(state.sources,step.ref)?.file).filter(Boolean))];
+  for (const source of sources) {
+    if (epoch !== state.previewEpoch || state.mode !== 'source') return;
+    const key=previewKey(source,'processed'), previous=processedPreviews.get(source)?.result;
+    if (processedPreviews.get(source)?.key === key) continue;
+    const result = previewCache.get(key) || mergePreviewFrames(previous,await api('preview',{data:clone(state.data),source,stage:'process',known:previewKnown(previous)}));
+    if (epoch !== state.previewEpoch || state.mode !== 'source') return;
+    rememberPreview(key,result); processedPreviews.set(source,{key,result});
+    refreshAdjustment();
+  }
 }
 async function previewSource(force = false) {
   if (!state.source || !state.data || !state.projectId || state.mode !== 'source') return;
   const epoch = ++state.previewEpoch, source = state.source, key = previewKey(source);
   if (force) previewCache.delete(key);
-  if (previewCache.has(key)) { showPreview(previewCache.get(key),source,key); return; }
-  $('#status-message').textContent = '正在预览切图和处理结果…';
-  let request = previewRequest;
-  if (!request || request.key !== key || force) {
-    request?.controller.abort();
-    const controller = new AbortController();
-    request = {key,controller,promise:api('preview',{data:clone(state.data),source,stage:state.sourceView === 'original' ? 'extract' : 'process'},false,controller.signal)};
-    previewRequest = request;
-  }
+  $('#status-message').textContent = state.sourceView === 'original' ? '正在预览切割…' : '正在更新调整预览…';
   try {
-    const result = await request.promise;
-    previewCache.delete(key); previewCache.set(key,result);
-    if (previewCache.size > 4) previewCache.delete(previewCache.keys().next().value);
+    let result=previewCache.get(key);
+    if (!result) {
+      let request=previewRequest;
+      if (!request || request.key !== key || force) {
+        request?.controller.abort();
+        const controller=new AbortController(), previous=state.sourceView === 'processed' ? processedPreviews.get(source)?.result : null;
+        request={key,controller,previous,promise:api('preview',{data:clone(state.data),source,
+          stage:state.sourceView === 'original' ? 'extract' : 'process',known:force ? {} : previewKnown(previous)},false,controller.signal)};
+        previewRequest=request;
+      }
+      result=mergePreviewFrames(request.previous,await request.promise);
+      rememberPreview(key,result);
+      if (previewRequest === request) previewRequest=null;
+    }
     if (epoch !== state.previewEpoch || source !== state.source) return;
     showPreview(result,source,key);
+    await prepareActionPreviews(epoch);
   } catch (error) {
-    if (error.name === 'AbortError') return;
-    if (epoch !== state.previewEpoch) return;
-    state.previewError = error.message;
+    if (error.name === 'AbortError' || epoch !== state.previewEpoch) return;
+    state.previewError=error.message;
+    if (state.sourceView === 'processed') { player.pause(); $('#play').disabled=true; $('#play').textContent='▶'; }
     if (state.mode === 'source') { renderInspector(); updateSaveStatus(); }
-    $('#status-message').textContent = '预览失败：' + error.message;
-  } finally { if (previewRequest === request) previewRequest = null; }
+    $('#status-message').textContent='预览失败：'+error.message;
+    if (previewRequest?.key === key) previewRequest=null;
+  }
 }
 
 function reviewInspector() {
@@ -950,7 +1053,7 @@ function bindReviewInspector() {
 function canDragFrame() {
   if (state.mode !== 'source' || state.sourceView !== 'processed' || state.busy || !state.preview || state.previewSource !== state.source) return false;
   const step = player.steps[player.index], process = resolvedSource().process;
-  return !!step?.bbox && (process.overrides?.[step.id]?.mode || process.mode || 'anchor') !== 'copy';
+  return sourceForFrame(state.sources,step?.ref)?.file === state.source && !!step?.bbox && (process.overrides?.[step.id]?.mode || process.mode || 'anchor') !== 'copy';
 }
 function releaseFramePointer(id) {
   const stage = $('#stage');
@@ -962,7 +1065,7 @@ function cancelFrameDrag(render = true) {
   const drag = frameDrag; frameDrag = null;
   if (drag.previous) state.previewOffsets[drag.id] = drag.previous;
   else delete state.previewOffsets[drag.id];
-  player.steps[drag.index].previewOffset = drag.previous;
+  player.steps.forEach(step=>{ if (step.ref === drag.ref) step.previewOffset=drag.previous; });
   releaseFramePointer(drag.pointerId);
   if (render) { renderInspector(); player.draw(); }
   if (state.previewKey !== previewKey(state.source)) schedulePreview();
@@ -973,7 +1076,7 @@ function moveFrameDrag(event) {
   drag.delta = [Math.round((event.clientX - drag.start[0]) * drag.ratio[0]),Math.round((event.clientY - drag.start[1]) * drag.ratio[1])];
   const translation = drag.delta.map((value,i) => value + (drag.previous?.[i] || 0));
   state.previewOffsets[drag.id] = translation;
-  player.steps[drag.index].previewOffset = translation;
+  player.steps.forEach(step=>{ if (step.ref === drag.ref) step.previewOffset=translation; });
   ['x','y'].forEach((axis,i) => { $('#override-' + axis).value = drag.offset[i] + drag.delta[i]; });
   player.draw();
 }
@@ -990,7 +1093,7 @@ $('#stage').addEventListener('pointerdown', event => {
   // Invalidate any preview in flight before using this image as the drag baseline.
   clearTimeout(previewTimer); state.previewEpoch++; previewRequest?.controller.abort(); previewRequest = null;
   const process = resolvedSource().process;
-  frameDrag = {pointerId:event.pointerId,id:step.id,index:player.index,previous,
+  frameDrag = {pointerId:event.pointerId,id:step.id,ref:step.ref,index:player.index,previous,
     offset:[...(process.overrides?.[step.id]?.offset || process.offset || [0,0])],
     start:[event.clientX,event.clientY],ratio,delta:[0,0]};
   $('#stage').setPointerCapture(event.pointerId); $('#stage').classList.add('frame-dragging');
@@ -1004,7 +1107,7 @@ $('#stage').addEventListener('pointerup', event => {
   if (!drag.delta.some(value => value !== 0)) {
     if (drag.previous) state.previewOffsets[drag.id] = drag.previous;
     else delete state.previewOffsets[drag.id];
-    player.steps[drag.index].previewOffset = drag.previous;
+    player.steps.forEach(step=>{ if (step.ref === drag.ref) step.previewOffset=drag.previous; });
     renderInspector(); player.draw();
     if (state.previewKey !== previewKey(state.source)) schedulePreview();
     return;
@@ -1014,7 +1117,7 @@ $('#stage').addEventListener('pointerup', event => {
     const overrides = clone(process.overrides || {}); overrides[drag.id] ||= {};
     overrides[drag.id].offset = drag.offset.map((value,i) => value + drag.delta[i]);
     rules.process.overrides = overrides;
-  });
+  },{render:false,preview:true});
   schedulePreview();
 });
 for (const type of ['pointercancel','lostpointercapture']) $('#stage').addEventListener(type,event => {
@@ -1098,6 +1201,18 @@ for (const type of ['pointercancel','lostpointercapture']) $('#stage').addEventL
 });
 $('#slice-select').onclick=()=>{ cancelRegionDrag(); sliceTool='select'; renderAll(); };
 $('#slice-create').onclick=()=>{ cancelRegionDrag(); sliceTool='create'; renderAll(); };
+$('#adjust-action').onchange=()=>{
+  player.pause(); state.adjustAction=$('#adjust-action').value; state.selected=0;
+  const first = state.adjustAction ? actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode)[0] : null;
+  const owner=sourceForFrame(state.sources,first?.ref);
+  if (owner && owner.file !== state.source) { state.source=owner.file; state.preview=null; state.previewKey=null; state.previewOffsets={}; }
+  if (state.adjustAction) $('#loop-preview').checked=!!merge(state.data.defaults,state.data.actions[state.adjustAction]).loop;
+  state.previewEpoch++; renderAll(); schedulePreview();
+};
+$('#adjust-playback').onchange=()=>{
+  player.pause(); state.adjustPlaybackMode=$('#adjust-playback').value; selectAdjustmentStep(0);
+  state.previewEpoch++; renderAll(); schedulePreview();
+};
 
 document.querySelectorAll('button[data-mode]').forEach(button => { button.onclick = () => mode(button.dataset.mode,button.dataset.view); });
 $('#action-edit').onclick = () => mode('action');
@@ -1288,7 +1403,7 @@ $('#reference-upload').onchange = () => uploadFile($('#reference-upload'),'refer
 $('#play').onclick = () => { player.toggle(); $('#play').textContent = player.playing ? 'Ⅱ' : '▶'; };
 function singleStep(delta) {
   player.pause(); player.seek(player.index + delta);
-  if (state.mode !== 'review') { state.selected = player.index; renderInspector(); renderTimeline(); onStep(player.index); }
+  if (state.mode !== 'review') { if (state.mode === 'source' && state.sourceView === 'processed') selectAdjustmentStep(player.index); else state.selected = player.index; renderInspector(); renderTimeline(); onStep(player.index); }
 }
 $('#previous').onclick = () => singleStep(-1); $('#next').onclick = () => singleStep(1);
 $('#speed').onchange = () => { player.speed = Number($('#speed').value); };

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import json
+import hashlib
 from pathlib import Path
 
 from PIL import Image
@@ -92,7 +93,7 @@ def process_source(cfg: Config, filename: str) -> int:
     return len(frames)
 
 
-def process_images(cfg: Config, filename: str, images: dict[str, Image.Image]) -> tuple[dict[str, Image.Image], float]:
+def process_images(cfg: Config, filename: str, images: dict[str, Image.Image], *, cache=None, versions=None) -> tuple[dict[str, Image.Image], float]:
     """Shared renderer for CLI stages and unsaved workbench previews."""
     if not images:
         raise ValueError("No extracted frames to process")
@@ -112,11 +113,22 @@ def process_images(cfg: Config, filename: str, images: dict[str, Image.Image]) -
     if unknown:
         raise ValueError(f"{filename}: process overrides refer to unknown sprite IDs: {sorted(unknown)}")
     frames = {}
+    base_settings = {key:value for key,value in settings.items() if key != 'overrides'}
     for key, image in images.items():
-        options = merge(settings, overrides.get(key, {}))
+        options = merge(base_settings, overrides.get(key, {}))
         # The base scale has already been combined with fit_height above.
         options.pop("scale", None)
         if "scale" in overrides.get(key, {}):
             options["scale"] = overrides[key]["scale"]
-        frames[f"{key}.png"] = normalize(image, cfg, options, scale)
+        digest = hashlib.sha256(image.tobytes())
+        digest.update(json.dumps([image.size, cfg.size, cfg.anchor, options, scale], sort_keys=True).encode())
+        version = digest.hexdigest()
+        rendered = cache.get(version) if cache is not None else None
+        if rendered is None:
+            rendered = normalize(image, cfg, options, scale)
+            if cache is not None:
+                cache.put(version, rendered, rendered.width * rendered.height * 4)
+        frames[f"{key}.png"] = rendered
+        if versions is not None:
+            versions[f'{key}.png'] = version
     return frames, scale

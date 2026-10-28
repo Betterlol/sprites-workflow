@@ -24,8 +24,9 @@ from .animation import playback
 from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_data, inside, integer, load_config, source_fingerprint
 from .export import pack_action, preview_action, preview_gif, update_manifest
 from .extract import cut_frames, preserve_slice_ids, previous_slices, slice_ids
-from .slices import read_slices, write_slices
-from .files import numbered_frames, read_image, replace_frames, write_json
+from .slices import read_slices, write_slices, extraction_fingerprint
+from .files import numbered_frames, read_image, replace_frames, write_json, frame_changes
+from .render_cache import RenderCache
 from .history import HistoryConflictError, OperationNotStarted, ProjectHistory
 from .process import process_images
 from .gif import encode_gif
@@ -140,6 +141,11 @@ class Project:
         self._image_config_signature = self.config_signature()
         self._asset_metadata: dict[Path, tuple[tuple[int, int], list[int], tuple[int, int, int, int] | None]] = {}
         self.versions = ProjectHistory(self.path.parent)
+        self._native_cache = RenderCache()
+        self._extracted_cache = RenderCache()
+        self._render_cache = RenderCache()
+        self._encoded_cache = RenderCache(32 * 1024 * 1024)
+        self._render_versions = {}
 
     def history_transaction(self, operation: str, paths: list[Path]):
         if all(path.resolve().is_relative_to(self.path.parent) for path in paths):
@@ -360,27 +366,47 @@ class Project:
         cfg = self.draft(data)
         if filename not in cfg.discover_sources():
             raise ValueError("Unknown source image")
-        cached = read_slices(cfg, filename)
+        cached = read_slices(cfg, filename, self._native_cache)
         if cached is None:
-            raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
-            keys = slice_ids(cfg, filename, boxes)
-            images = dict(zip(keys, raw))
-            descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
+            extraction_key = extraction_fingerprint(cfg, filename) + json.dumps(previous_slices(cfg, filename), sort_keys=True)
+            cached = self._extracted_cache.get(extraction_key)
+            if cached is None:
+                raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
+                keys = slice_ids(cfg, filename, boxes)
+                images = dict(zip(keys, raw))
+                descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
+                cached = (images, descriptors)
+                self._extracted_cache.put(extraction_key, cached, sum(image.width * image.height * 4 for image in raw))
+            images, descriptors = cached
         else:
             images, descriptors = cached
-        frames, scale = ({f"{key}.png": image for key, image in images.items()}, 1.0) if stage == "extract" else process_images(cfg, filename, images)
+        self._render_versions = {}
+        frames, scale = ({f"{key}.png": image for key, image in images.items()}, 1.0) if stage == "extract" else process_images(
+            cfg, filename, images, cache=self._render_cache, versions=self._render_versions)
         return cfg, images, frames, descriptors, scale
 
-    def preview(self, data: dict, filename: str, stage: str = "process") -> dict:
+    def preview(self, data: dict, filename: str, stage: str = "process", known: dict | None = None) -> dict:
         with self.lock:
+            if known is not None and (not isinstance(known, dict) or any(not isinstance(v, str) for v in known.values())):
+                raise ValueError('known must map frame references to preview versions')
             cfg, _raw, frames, descriptors, scale = self.render(data, filename, stage)
+            result = []
+            for item in descriptors:
+                image = frames[item['file']]
+                version = self._render_versions.get(item['file']) or hashlib.sha256(image.tobytes() + str(image.size).encode()).hexdigest()
+                ref = cfg.source_id(filename) + '/' + item['file']
+                frame = {'id':Path(item['file']).stem,'ref':ref,'box':item['source_box'],
+                         'bbox':image.getbbox(),'version':version}
+                if known is None or known.get(ref) != version:
+                    url = self._encoded_cache.get(version)
+                    if url is None:
+                        url = data_url(image)
+                        self._encoded_cache.put(version, url, len(url))
+                    frame['url'] = url
+                result.append(frame)
             return {"stage": stage, "scale": scale,
                 "next_id": max(cfg.source_spec(filename)['extract'].get('next_id', 0), max(map(int, _raw), default=-1) + 1),
-                "frames": [
-                {"id": Path(item["file"]).stem, "ref": cfg.source_id(filename) + "/" + item["file"],
-                 "box": item["source_box"], "url": data_url(frames[item["file"]]),
-                 "bbox": frames[item["file"]].getbbox()}
-                for item in descriptors]}
+                "frames": result}
 
     def apply(self, data: dict, revision: str, filename: str, asset_revision: str | None = None) -> dict:
         with self.lock:
@@ -398,11 +424,13 @@ class Project:
             self.check_assets(asset_revision)
             cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
             directory = inside(cfg.directory("processed_sprites"), cfg.source_id(filename))
-            with self.history_transaction("apply", [self.path, directory]):
+            changed, removed = frame_changes(directory, frames, r'\d+\.png')
+            paths = [directory] if not directory.exists() else [directory / '_stage.json', *[directory / name for name in changed], *removed]
+            with self.history_transaction("apply", [self.path, *paths]):
                 replace_frames(directory, frames, owned=r"\d+\.png", metadata={
                     "stage": "process", "source": filename, "scale": scale, "files": list(frames),
                     "frames": descriptors, "fingerprint": self.fingerprint(cfg, filename),
-                })
+                }, write_names=changed)
                 write_json(self.path, cfg.data)
             return self.state()
 

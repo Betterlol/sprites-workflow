@@ -17,7 +17,7 @@ def extraction_fingerprint(cfg: Config, filename: str) -> str:
     return digest.hexdigest()
 
 
-def read_slices(cfg: Config, filename: str):
+def read_slices(cfg: Config, filename: str, image_cache=None):
     """Return verified images/descriptors, or None for absent, stale or corrupt cache."""
     directory = inside(cfg.directory('source_sprites'), cfg.source_id(filename))
     try:
@@ -37,10 +37,15 @@ def read_slices(cfg: Config, filename: str):
         for item in descriptors:
             path = inside(directory, item['file'])
             content = path.read_bytes()
-            if hashlib.sha256(content).hexdigest() != stage['digests'][item['file']]:
+            digest = hashlib.sha256(content).hexdigest()
+            if digest != stage['digests'][item['file']]:
                 return None
-            with Image.open(io.BytesIO(content)) as opened:
-                image = opened.convert('RGBA')
+            image = image_cache.get(digest) if image_cache is not None else None
+            if image is None:
+                with Image.open(io.BytesIO(content)) as opened:
+                    image = opened.convert('RGBA')
+                if image_cache is not None:
+                    image_cache.put(digest, image, image.width * image.height * 4)
             x, y, right, bottom = item['source_box']
             if image.size != (right-x, bottom-y):
                 return None
