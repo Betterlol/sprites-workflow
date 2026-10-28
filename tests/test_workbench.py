@@ -119,8 +119,8 @@ class WorkbenchTests(unittest.TestCase):
         versions = {frame['ref']:frame.get('version','') for frame in first['frames']}
         self.data['sources']['walk.png']['process'] = {'overrides':{'001':{'offset':[1,-2]}}}
         from sprite_pipeline.workbench import data_url
-        with patch('sprite_pipeline.workbench.cut_frames', side_effect=AssertionError('unchanged extraction was repeated')), \
-                patch('sprite_pipeline.process.normalize', wraps=normalize) as renderer, \
+        with patch('sprite_pipeline.application.rendering.cut_frames', side_effect=AssertionError('unchanged extraction was repeated')), \
+                patch('sprite_pipeline.imaging.processing.normalize', wraps=normalize) as renderer, \
                 patch('sprite_pipeline.workbench.data_url', wraps=data_url) as encoder:
             response = self.post('preview', source='walk.png', known=versions)
             self.assertEqual(response.status_code,200,response.text)
@@ -144,11 +144,11 @@ class WorkbenchTests(unittest.TestCase):
     def test_group_and_canvas_changes_invalidate_all_frame_recipes(self):
         self.post('preview',source='walk.png')
         self.data['sources']['walk.png']['process'] = {'scale':0.75}
-        with patch('sprite_pipeline.process.normalize',wraps=normalize) as renderer:
+        with patch('sprite_pipeline.imaging.processing.normalize',wraps=normalize) as renderer:
             self.assertEqual(self.post('preview',source='walk.png').status_code,200)
             self.assertEqual(renderer.call_count,3)
         self.data['frame_size']=[20,20]
-        with patch('sprite_pipeline.process.normalize',wraps=normalize) as renderer:
+        with patch('sprite_pipeline.imaging.processing.normalize',wraps=normalize) as renderer:
             self.assertEqual(self.post('preview',source='walk.png').status_code,200)
             self.assertEqual(renderer.call_count,3)
 
@@ -156,7 +156,7 @@ class WorkbenchTests(unittest.TestCase):
         self.data['sources']['walk.png']['process']={'fit_height':4,'max_scale':2}
         self.post('preview',source='walk.png')
         self.data['sources']['walk.png']['process']['overrides']={'002':{'offset':[1,0]}}
-        with patch('sprite_pipeline.process.normalize',wraps=normalize) as renderer:
+        with patch('sprite_pipeline.imaging.processing.normalize',wraps=normalize) as renderer:
             result = self.post('preview',source='walk.png').json()
             self.assertEqual(renderer.call_count,1)
         self.assertEqual(result['scale'],0.5)
@@ -169,7 +169,7 @@ class WorkbenchTests(unittest.TestCase):
         original = json.loads(self.path.read_text())
         self.data['actions']['walk']['fps'] = 25
         self.data['sources']['walk.png']['process'] = {'scale': 1000}
-        with patch('sprite_pipeline.workbench.process_images', side_effect=AssertionError('must not process')):
+        with patch('sprite_pipeline.application.rendering.process_frames', side_effect=AssertionError('must not process')):
             response = self.save_slices()
         self.assertEqual(response.status_code, 200, response.text)
         saved = json.loads(self.path.read_text())
@@ -185,7 +185,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.data = response.json()['data']; self.revision = response.json()['revision']
         self.data['sources']['walk.png']['process'] = {'offset': [1, -2]}
-        with patch('sprite_pipeline.workbench.cut_frames', side_effect=AssertionError('unexpected recut')):
+        with patch('sprite_pipeline.application.rendering.cut_frames', side_effect=AssertionError('unexpected recut')):
             response = self.post('preview', source='walk.png')
             self.assertEqual(response.status_code, 200, response.text)
             response = self.post('apply', source='walk.png')

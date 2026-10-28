@@ -7,7 +7,7 @@ import json
 
 from .config import Config, inside
 from .sequence import sequence_steps
-from .workbench import action_steps, review_steps
+from .domain.actions import action_steps, review_steps
 
 
 def compare_composition(cfg: Config, action: str, *, review: str | None = None,

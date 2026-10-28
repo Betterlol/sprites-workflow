@@ -12,7 +12,7 @@ from PIL import Image
 
 from .animation import playback
 from .config import Config, config_from_data, inside
-from .workbench import action_steps
+from .domain.actions import action_steps
 
 
 def _image(content: bytes) -> Image.Image:

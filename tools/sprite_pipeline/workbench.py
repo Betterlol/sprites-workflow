@@ -20,7 +20,9 @@ from urllib.parse import quote, urlencode
 
 from PIL import Image
 
-from .animation import playback
+from .domain.actions import action_steps, review_steps, validate_editor
+from .domain.errors import ConflictError, OperationCancelled, ExportCancelled
+from .application.rendering import RenderService, RenderResult
 from .config import Config, IMAGE_SUFFIXES, NAME, PROJECT_PATHS, config_from_data, inside, integer, load_config, source_fingerprint
 from .export import pack_action, preview_action, preview_gif, update_manifest
 from .extract import cut_frames, preserve_slice_ids, previous_slices, slice_ids
@@ -35,16 +37,10 @@ from .locking import project_lock
 REFERENCE_DIRS = ("references", "reference")
 
 
-class ConflictError(ValueError):
-    """The on-disk project changed since the editor loaded it."""
 
 
-class OperationCancelled(Exception):
-    """A long operation was stopped at a safe item boundary."""
 
 
-class ExportCancelled(OperationCancelled):
-    """An export was stopped at a safe item boundary."""
 
 
 def png_bytes(image: Image.Image) -> bytes:
@@ -63,73 +59,10 @@ def image_url(kind: str, reference: str, path: Path, project_id: str | None = No
     return route + "?" + urlencode({"kind": kind, "ref": reference, "v": f"{stat.st_mtime_ns}-{stat.st_size}"})
 
 
-def action_steps(cfg: Config, name: str, mode: str = "runtime") -> list[dict]:
-    if name not in cfg.data["actions"]:
-        raise ValueError(f"Unknown action: {name}")
-    spec = cfg.action(name)
-    references = spec.get("sprites") or []
-    if not references:
-        raise ValueError(f"{name}: add at least one sprite to the action")
-    if mode == "display":
-        order, durations, _ = playback(spec, len(references))
-    elif mode == "runtime":
-        order = list(range(len(references)))
-        durations = [round(1000 / spec.get("fps", 12))] * len(order)
-    else:
-        raise ValueError("Playback mode must be runtime or display")
-    return [{"ref": references[index], "action": name, "frame": index, "duration_ms": duration}
-            for index, duration in zip(order, durations)]
 
 
-def review_steps(cfg: Config, review: dict, *, allow_empty: bool = False) -> list[dict]:
-    if not isinstance(review, dict) or not isinstance(review.get("clips", []), list):
-        raise ValueError("A review must contain a clips array")
-    if not isinstance(review.get("loop", True), bool):
-        raise ValueError("review.loop must be boolean")
-    mode = review.get("mode", "runtime")
-    if mode not in {"runtime", "display"}:
-        raise ValueError("review.mode must be runtime or display")
-    result = []
-    for clip_index, clip in enumerate(review.get("clips", [])):
-        if not isinstance(clip, dict):
-            raise ValueError("Review clips must be objects")
-        repeat = integer(clip.get("repeat", 1), "clip.repeat", 1)
-        if repeat > 100:
-            raise ValueError("A review clip may repeat at most 100 times")
-        name = clip.get("action")
-        if name not in cfg.data["actions"]:
-            raise ValueError(f"Review references unknown action: {name}")
-        if not cfg.action(name).get("sprites") and allow_empty:
-            continue
-        steps = action_steps(cfg, name, mode)
-        start = integer(clip.get("start", 0), "clip.start")
-        end = clip.get("end")
-        end = len(steps) - 1 if end is None else integer(end, "clip.end")
-        if not 0 <= start <= end < len(steps):
-            raise ValueError(f"{name}: clip range must be within 0..{len(steps) - 1}")
-        for repetition in range(repeat):
-            for position, step in enumerate(steps[start:end + 1]):
-                result.append({**step, "clip": clip_index, "repetition": repetition,
-                               "boundary": position == 0})
-                if len(result) > 10000:
-                    raise ValueError("Review exceeds 10,000 playback steps")
-    if not result and not allow_empty:
-        raise ValueError("Add at least one nonempty action to the review")
-    return result
 
 
-def validate_editor(cfg: Config) -> None:
-    for name in cfg.data["actions"]:
-        spec = cfg.action(name)
-        if spec.get("sprites"):
-            playback(spec, len(spec["sprites"]))
-    editor = cfg.data.get("workbench", {})
-    if not isinstance(editor, dict) or not isinstance(editor.get("reviews", {}), dict):
-        raise ValueError("workbench.reviews must be an object")
-    for name, review in editor.get("reviews", {}).items():
-        if not NAME.fullmatch(name):
-            raise ValueError(f"Invalid review ID: {name}")
-        review_steps(cfg, review, allow_empty=True)
 
 
 class Project:
@@ -141,11 +74,8 @@ class Project:
         self._image_config_signature = self.config_signature()
         self._asset_metadata: dict[Path, tuple[tuple[int, int], list[int], tuple[int, int, int, int] | None]] = {}
         self.versions = ProjectHistory(self.path.parent)
-        self._native_cache = RenderCache()
-        self._extracted_cache = RenderCache()
-        self._render_cache = RenderCache()
+        self.renderer = RenderService()
         self._encoded_cache = RenderCache(32 * 1024 * 1024)
-        self._render_versions = {}
 
     def history_transaction(self, operation: str, paths: list[Path]):
         if all(path.resolve().is_relative_to(self.path.parent) for path in paths):
@@ -336,7 +266,8 @@ class Project:
             minimum = max(current.source_spec(filename)['extract'].get('next_id', 0),
                           max([int(key) for key in old_ids] + [-1]) + 1)
             settings['extract']['next_id'] = max(minimum, settings['extract'].get('next_id', 0))
-            cfg, images, _, descriptors, _ = self.render(data, filename, 'extract')
+            rendered = self.render(data, filename, 'extract')
+            cfg, images, descriptors = rendered.config, rendered.raw, rendered.descriptors
             keys = set(images)
             prefix = cfg.source_id(filename) + '/'
             available = {prefix + item['file'] for item in descriptors}
@@ -360,40 +291,19 @@ class Project:
                 write_json(self.path, cfg.data)
             return self.state()
 
-    def render(self, data: dict, filename: str, stage: str = "process") -> tuple[Config, dict, dict, list, float]:
-        if stage not in {"extract", "process"}:
-            raise ValueError("Unknown preview stage")
-        cfg = self.draft(data)
-        if filename not in cfg.discover_sources():
-            raise ValueError("Unknown source image")
-        cached = read_slices(cfg, filename, self._native_cache)
-        if cached is None:
-            extraction_key = extraction_fingerprint(cfg, filename) + json.dumps(previous_slices(cfg, filename), sort_keys=True)
-            cached = self._extracted_cache.get(extraction_key)
-            if cached is None:
-                raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
-                keys = slice_ids(cfg, filename, boxes)
-                images = dict(zip(keys, raw))
-                descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
-                cached = (images, descriptors)
-                self._extracted_cache.put(extraction_key, cached, sum(image.width * image.height * 4 for image in raw))
-            images, descriptors = cached
-        else:
-            images, descriptors = cached
-        self._render_versions = {}
-        frames, scale = ({f"{key}.png": image for key, image in images.items()}, 1.0) if stage == "extract" else process_images(
-            cfg, filename, images, cache=self._render_cache, versions=self._render_versions)
-        return cfg, images, frames, descriptors, scale
+    def render(self, data: dict, filename: str, stage: str = "process") -> RenderResult:
+        return self.renderer.render(self.draft(data), filename, stage)
 
     def preview(self, data: dict, filename: str, stage: str = "process", known: dict | None = None) -> dict:
         with self.lock:
             if known is not None and (not isinstance(known, dict) or any(not isinstance(v, str) for v in known.values())):
                 raise ValueError('known must map frame references to preview versions')
-            cfg, _raw, frames, descriptors, scale = self.render(data, filename, stage)
+            rendered = self.render(data, filename, stage)
+            cfg, _raw, frames, descriptors, scale = rendered.config, rendered.raw, rendered.frames, rendered.descriptors, rendered.scale
             result = []
             for item in descriptors:
                 image = frames[item['file']]
-                version = self._render_versions.get(item['file']) or hashlib.sha256(image.tobytes() + str(image.size).encode()).hexdigest()
+                version = rendered.versions.get(item['file']) or hashlib.sha256(image.tobytes() + str(image.size).encode()).hexdigest()
                 ref = cfg.source_id(filename) + '/' + item['file']
                 frame = {'id':Path(item['file']).stem,'ref':ref,'box':item['source_box'],
                          'bbox':image.getbbox(),'version':version}
@@ -412,7 +322,8 @@ class Project:
         with self.lock:
             self.check_revision(revision)
             self.check_assets(asset_revision)
-            cfg, _, frames, descriptors, scale = self.render(data, filename)
+            rendered = self.render(data, filename)
+            cfg, frames, descriptors, scale = rendered.config, rendered.frames, rendered.descriptors, rendered.scale
             validate_editor(cfg)
             prefix = cfg.source_id(filename) + "/"
             available = {prefix + name for name in frames}
@@ -464,7 +375,8 @@ class Project:
                 raise OperationCancelled("Preparation cancelled")
             directories = [inside(cfg.directory("processed_sprites"), cfg.source_id(filename)) for filename, _ in pending]
             with self.history_transaction("prepare", [self.path, *directories]):
-                for filename, (_, _, frames, descriptors, scale) in pending:
+                for filename, rendered in pending:
+                    frames, descriptors, scale = rendered.frames, rendered.descriptors, rendered.scale
                     cfg.data.setdefault("sources", {}).setdefault(filename, {}).setdefault("extract", {})["identities"] = descriptors
                     replace_frames(inside(cfg.directory("processed_sprites"), cfg.source_id(filename)), frames,
                                    owned=r"\d+\.png", metadata={

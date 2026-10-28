@@ -15,7 +15,7 @@ from .animation import playback
 from .config import Config, config_from_data, inside, positive
 from .gif import encode_gif
 from .sequence import sequence_steps
-from .workbench import action_steps, review_steps
+from .domain.actions import action_steps, review_steps
 
 
 def _contact_pages(folder: Path, steps: list[dict], images: dict[str, Image.Image],
