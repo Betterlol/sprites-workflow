@@ -17,7 +17,9 @@ def playback(spec: dict, count: int) -> tuple[list[int], list[int], int]:
     if "durations_ms" in animation:
         durations = animation["durations_ms"]
         if not isinstance(durations, list) or len(durations) != len(order):
-            raise ValueError("animation.durations_ms must have one duration per playback step (including repeated frames)")
+            raise ValueError(
+                "animation.durations_ms must have one duration per playback step (including repeated frames)"
+            )
     else:
         fps = positive(animation.get("fps", spec.get("fps", 12)), "animation.fps")
         duration = animation.get("duration_ms", round(1000 / fps))

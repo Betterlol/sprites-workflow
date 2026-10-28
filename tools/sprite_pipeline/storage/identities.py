@@ -1,7 +1,10 @@
 """Resolve stable IDs against authored rules or legacy stage inventories."""
+
 import json
-from sprite_pipeline.storage.configuration import Config, inside
+
 from sprite_pipeline.domain.identity import preserve_slice_ids
+from sprite_pipeline.storage.configuration import Config, inside
+
 
 def previous_slices(cfg: Config, filename: str) -> list[dict]:
     authored = cfg.source_spec(filename)["extract"].get("identities")
@@ -16,11 +19,12 @@ def previous_slices(cfg: Config, filename: str) -> list[dict]:
                 return payload["frames"]
     return []
 
+
 def slice_ids(cfg: Config, filename: str, boxes: list[tuple]) -> list[str]:
-    spec = cfg.source_spec(filename)['extract']
-    explicit = spec.get('region_ids') if spec.get('method') == 'boxes' else None
+    spec = cfg.source_spec(filename)["extract"]
+    explicit = spec.get("region_ids") if spec.get("method") == "boxes" else None
     if explicit is not None:
         if len(explicit) != len(boxes):
-            raise ValueError('extract.region_ids must match extract.boxes')
+            raise ValueError("extract.region_ids must match extract.boxes")
         return list(explicit)
-    return preserve_slice_ids(boxes, previous_slices(cfg, filename), spec.get('next_id', 0))
+    return preserve_slice_ids(boxes, previous_slices(cfg, filename), spec.get("next_id", 0))

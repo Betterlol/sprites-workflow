@@ -8,8 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from sprite_pipeline.domain.errors import ConflictError, OperationCancelled
 from sprite_pipeline.application.project import Project
+from sprite_pipeline.domain.errors import ConflictError, OperationCancelled
 
 
 @dataclass
@@ -29,8 +29,14 @@ class ExportJob:
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
     def summary(self) -> dict:
-        summary = {"id": self.id, "status": self.status, "completed": self.completed,
-                   "total": self.total, "phase": self.phase, "error": self.error}
+        summary = {
+            "id": self.id,
+            "status": self.status,
+            "completed": self.completed,
+            "total": self.total,
+            "phase": self.phase,
+            "error": self.error,
+        }
         if self.status == "done" and self.result is not None:
             summary["result"] = self.result
         return summary
@@ -48,7 +54,9 @@ class ExportJobs:
             if job.status in {"done", "failed", "cancelled"} and now - job.created_at > 600:
                 del self.jobs[job_id]
         while len(self.jobs) >= 8:
-            finished = [job for job in self.jobs.values() if job.status in {"done", "failed", "cancelled"}]
+            finished = [
+                job for job in self.jobs.values() if job.status in {"done", "failed", "cancelled"}
+            ]
             if not finished:
                 raise ValueError("Too many active exports; wait for a job to finish")
             oldest = min(finished, key=lambda job: job.created_at)
@@ -61,29 +69,55 @@ class ExportJobs:
             self.jobs[job.id] = job
             return job
 
-    def start(self, project_id: str, project: Project, data: dict, options: dict,
-              revision: str | None, asset_revision: str | None) -> dict:
+    def start(
+        self,
+        project_id: str,
+        project: Project,
+        data: dict,
+        options: dict,
+        revision: str | None,
+        asset_revision: str | None,
+    ) -> dict:
         job = self._new_job(project_id)
         self.pool.submit(self._run, job, project, data, options, revision, asset_revision)
         return job.summary()
 
-    def start_prepare(self, project_id: str, project: Project, data: dict,
-                      revision: str | None, asset_revision: str | None) -> dict:
+    def start_prepare(
+        self,
+        project_id: str,
+        project: Project,
+        data: dict,
+        revision: str | None,
+        asset_revision: str | None,
+    ) -> dict:
         job = self._new_job(project_id)
         self.pool.submit(self._run_prepare, job, project, data, revision, asset_revision)
         return job.summary()
 
-    def _run(self, job: ExportJob, project: Project, data: dict, options: dict,
-             revision: str | None, asset_revision: str | None) -> None:
+    def _run(
+        self,
+        job: ExportJob,
+        project: Project,
+        data: dict,
+        options: dict,
+        revision: str | None,
+        asset_revision: str | None,
+    ) -> None:
         def progress(completed: int, total: int, phase: str) -> None:
             with self.lock:
                 job.completed, job.total, job.phase = completed, total, phase
+
         with self.lock:
             job.status = "running"
         try:
             content, filename, media_type = project.export(
-                data, options, progress=progress, cancelled=job.cancel_event,
-                expected_asset_revision=asset_revision, expected_revision=revision)
+                data,
+                options,
+                progress=progress,
+                cancelled=job.cancel_event,
+                expected_asset_revision=asset_revision,
+                expected_revision=revision,
+            )
             with self.lock:
                 if job.cancel_event.is_set():
                     job.status, job.phase = "cancelled", "已取消"
@@ -97,16 +131,24 @@ class ExportJobs:
             with self.lock:
                 job.status, job.error = "failed", str(error)
 
-    def _run_prepare(self, job: ExportJob, project: Project, data: dict,
-                     revision: str | None, asset_revision: str | None) -> None:
+    def _run_prepare(
+        self,
+        job: ExportJob,
+        project: Project,
+        data: dict,
+        revision: str | None,
+        asset_revision: str | None,
+    ) -> None:
         def progress(completed: int, total: int, phase: str) -> None:
             with self.lock:
                 job.completed, job.total, job.phase = completed, total, phase
+
         with self.lock:
             job.status = "running"
         try:
-            result = project.prepare(data, revision, asset_revision,
-                                     progress=progress, cancelled=job.cancel_event)
+            result = project.prepare(
+                data, revision, asset_revision, progress=progress, cancelled=job.cancel_event
+            )
             with self.lock:
                 job.result, job.status, job.phase = result, "done", "已完成"
         except OperationCancelled:

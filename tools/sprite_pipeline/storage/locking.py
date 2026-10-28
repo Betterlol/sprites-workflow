@@ -30,9 +30,11 @@ class ProjectLock:
                 try:
                     if os.name == "nt":
                         import msvcrt
+
                         msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
                     else:
                         import fcntl
+
                         fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as error:
                     self.handle.close()
@@ -52,9 +54,11 @@ class ProjectLock:
                     self.handle.seek(0)
                     if os.name == "nt":
                         import msvcrt
+
                         msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
                     else:
                         import fcntl
+
                         fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
                 finally:
                     self.handle.close()

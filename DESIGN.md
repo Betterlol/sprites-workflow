@@ -46,3 +46,10 @@ Agent 必须先读 [AGENTS.md](AGENTS.md)、[工作区说明](workspaces/README.
 网页调整使用与动作编排相同的运行/展示步骤计算，保留重复引用及跨原图槽位。所选编辑槽位与播放游标独立；图片更新不重置游标或当前帧累计时长。预览图片按稳定引用和版本合并，仅更新变化的时间轴图片。
 
 Project 持有受容量限制的原始切片、处理结果和编码缓存。处理键包含原始像素、尺寸、画布、锚点、有效单帧参数和解析后的整组倍率，不包含其他帧的 overrides。preview 的可选 known 映射声明客户端已有的 ref/version，响应保留帧元数据但省略未变化的图片；缺省调用仍返回完整图片。apply 只重写变化 PNG，历史事务只覆盖配置、处理清单及受影响文件；原有整工程草稿保存语义不变。
+# Python package boundaries
+
+Python implementation responsibilities and dependency rules are documented in
+[docs/python-architecture.md](docs/python-architecture.md). Domain playback and
+image computation are independent of project IO; application operations compose
+storage under the existing revision and history transaction boundaries. Existing
+top-level Python imports remain compatibility facades.

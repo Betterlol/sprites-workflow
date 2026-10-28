@@ -7,12 +7,18 @@ import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from sprite_pipeline.storage.configuration import Config, NAME, PROJECT_PATHS, config_from_data, inside, load_config
+from sprite_pipeline.application.project import Project
+from sprite_pipeline.domain.errors import ConflictError
+from sprite_pipeline.storage.configuration import (
+    NAME,
+    PROJECT_PATHS,
+    Config,
+    config_from_data,
+    inside,
+    load_config,
+)
 from sprite_pipeline.storage.files import write_json
 from sprite_pipeline.storage.locking import project_lock
-from sprite_pipeline.domain.errors import ConflictError
-from sprite_pipeline.application.project import Project
-
 
 DEFAULT_WORKSPACES = Path(__file__).resolve().parents[3] / "workspaces"
 EXTERNAL_ID = "@config"
@@ -20,13 +26,28 @@ EXTERNAL_ID = "@config"
 
 def validate_project_id(value: str) -> str:
     """Portable single directory names; Unicode is supported on Windows too."""
-    if (not isinstance(value, str) or not value or len(value) > 80 or value != value.strip()
-            or value in {".", ".."} or value.startswith(".") or value.endswith(".")
-            or any(ord(c) < 32 or c in '\\/:*?"<>|@' for c in value)
-            or value.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL",
-                                                *[f"COM{i}" for i in range(1, 10)],
-                                                *[f"LPT{i}" for i in range(1, 10)]}):
-        raise ValueError("工程目录名无效：请使用 1–80 个字符，避开路径分隔符、末尾句点及 Windows 保留名称。")
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 80
+        or value != value.strip()
+        or value in {".", ".."}
+        or value.startswith(".")
+        or value.endswith(".")
+        or any(ord(c) < 32 or c in '\\/:*?"<>|@' for c in value)
+        or value.split(".")[0].upper()
+        in {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            *[f"COM{i}" for i in range(1, 10)],
+            *[f"LPT{i}" for i in range(1, 10)],
+        }
+    ):
+        raise ValueError(
+            "工程目录名无效：请使用 1–80 个字符，避开路径分隔符、末尾句点及 Windows 保留名称。"
+        )
     return value
 
 
@@ -42,8 +63,12 @@ class ProjectStore:
         if config_path is not None:
             config_path = config_path.resolve()
             cfg = load_config(config_path)
-            if (config_path.name == "pipeline.json" and config_path.parent.parent == self.root
-                    and cfg.source != config_path.parent and cfg.source.is_relative_to(config_path.parent)):
+            if (
+                config_path.name == "pipeline.json"
+                and config_path.parent.parent == self.root
+                and cfg.source != config_path.parent
+                and cfg.source.is_relative_to(config_path.parent)
+            ):
                 self.initial_id = config_path.parent.name
                 self.get(self.initial_id)
             else:
@@ -70,13 +95,17 @@ class ProjectStore:
                 if project_id != EXTERNAL_ID:
                     source = self._validated_config[path].source
                     if not source.is_relative_to(path.parent) or source == path.parent:
-                        raise ValueError("工作区工程的 source 必须位于工程目录内；旧布局请使用 --config 打开。")
+                        raise ValueError(
+                            "工作区工程的 source 必须位于工程目录内；旧布局请使用 --config 打开。"
+                        )
                 return cached
         signature = hashlib.sha256(path.read_bytes()).hexdigest()
         cfg = load_config(path)
         if project_id != EXTERNAL_ID:
             if not cfg.source.is_relative_to(path.parent) or cfg.source == path.parent:
-                raise ValueError("工作区工程的 source 必须位于工程目录内；旧布局请使用 --config 打开。")
+                raise ValueError(
+                    "工作区工程的 source 必须位于工程目录内；旧布局请使用 --config 打开。"
+                )
         with self.lock:
             if path not in self.cache:
                 self.cache[path] = Project(path, project_id=project_id)
@@ -93,10 +122,15 @@ class ProjectStore:
     def describe(self, project_id: str) -> dict:
         project = self.get(project_id)
         cfg = load_config(project.path)
-        return {"id": project_id, "name": cfg.data.get("project", {}).get("name") or cfg.character,
-                "character": cfg.character, "frame_size": list(cfg.size),
-                "directory": str(project.path.parent), "config": str(project.path),
-                "external": project_id == EXTERNAL_ID}
+        return {
+            "id": project_id,
+            "name": cfg.data.get("project", {}).get("name") or cfg.character,
+            "character": cfg.character,
+            "frame_size": list(cfg.size),
+            "directory": str(project.path.parent),
+            "config": str(project.path),
+            "external": project_id == EXTERNAL_ID,
+        }
 
     def list(self) -> list[dict]:
         entries = []
@@ -104,44 +138,85 @@ class ProjectStore:
             try:
                 entries.append(self.describe(EXTERNAL_ID))
             except (ValueError, OSError, TypeError, KeyError) as error:
-                entries.append({"id": EXTERNAL_ID, "name": self.external.parent.name, "error": str(error)})
+                entries.append(
+                    {"id": EXTERNAL_ID, "name": self.external.parent.name, "error": str(error)}
+                )
         if self.root.is_dir():
             for directory in sorted(self.root.iterdir(), key=lambda p: p.name.casefold()):
                 if directory.name.startswith(".") or not (directory / "pipeline.json").is_file():
                     continue
-                if self.external is not None and (directory / "pipeline.json").resolve() == self.external:
+                if (
+                    self.external is not None
+                    and (directory / "pipeline.json").resolve() == self.external
+                ):
                     continue
                 try:
                     entries.append(self.describe(directory.name))
                 except (ValueError, OSError, TypeError, KeyError) as error:
-                    entries.append({"id": directory.name, "name": directory.name, "error": str(error)})
+                    entries.append(
+                        {"id": directory.name, "name": directory.name, "error": str(error)}
+                    )
         return entries
 
-    def create(self, name: str, project_id: str | None = None, *, frame_size: list[int] | None = None,
-               anchor: list[float] | None = None) -> dict:
+    def create(
+        self,
+        name: str,
+        project_id: str | None = None,
+        *,
+        frame_size: list[int] | None = None,
+        anchor: list[float] | None = None,
+    ) -> dict:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValueError("请输入 1–120 个字符的工程名称。")
         name = name.strip()
         project_id = validate_project_id(name if project_id is None else project_id)
         size = [640, 640] if frame_size is None else frame_size
-        anchor = [.5, .9] if anchor is None else anchor
-        if (not isinstance(anchor, list) or len(anchor) != 2
-                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 1 for v in anchor)):
+        anchor = [0.5, 0.9] if anchor is None else anchor
+        if (
+            not isinstance(anchor, list)
+            or len(anchor) != 2
+            or any(
+                isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 1
+                for v in anchor
+            )
+        ):
             raise ValueError("anchor must contain normalized x/y values between 0 and 1")
-        character = project_id if NAME.fullmatch(project_id) else "character-" + hashlib.sha256(project_id.encode()).hexdigest()[:10]
-        data = {"version": 2, "project": {"name": name}, "character": character,
-                "frame_size": size, "paths": dict(PROJECT_PATHS),
-                "defaults": {"fps": 12, "loop": False,
-                             "extract": {"method": "components", "min_component_pixels": 16, "major_min_pixels": 80},
-                             "process": {"mode": "anchor", "overflow": "error"}, "pack": {"columns": 4}},
-                "sources": {}, "actions": {}, "workbench": {"reviews": {}}}
+        character = (
+            project_id
+            if NAME.fullmatch(project_id)
+            else "character-" + hashlib.sha256(project_id.encode()).hexdigest()[:10]
+        )
+        data = {
+            "version": 2,
+            "project": {"name": name},
+            "character": character,
+            "frame_size": size,
+            "paths": dict(PROJECT_PATHS),
+            "defaults": {
+                "fps": 12,
+                "loop": False,
+                "extract": {
+                    "method": "components",
+                    "min_component_pixels": 16,
+                    "major_min_pixels": 80,
+                },
+                "process": {"mode": "anchor", "overflow": "error"},
+                "pack": {"columns": 4},
+            },
+            "sources": {},
+            "actions": {},
+            "workbench": {"reviews": {}},
+        }
         # Validate size before using it in arithmetic, and validate before creating files.
         destination = self.config_path(project_id).parent
         cfg = config_from_data(data, destination / "pipeline.json")
         if max(cfg.size) > 4096:
             raise ValueError("Workbench frame dimensions must be <= 4096 pixels")
-        data["anchor"] = {"x": anchor[0], "y": anchor[1],
-                          "pixels": [round(size[0] * anchor[0]), round(size[1] * anchor[1])]}
+        data["anchor"] = {
+            "x": anchor[0],
+            "y": anchor[1],
+            "pixels": [round(size[0] * anchor[0]), round(size[1] * anchor[1])],
+        }
         config_from_data(data, destination / "pipeline.json")
         self.root.mkdir(parents=True, exist_ok=True)
         with self.lock, project_lock(self.root / "projects.json"):
@@ -159,6 +234,8 @@ class ProjectStore:
                     f"# {name}\n\n原图放入 source/，参考资料放入 references/。\n"
                     "处理规则、动作和 Review 统一保存于 pipeline.json。\n"
                     "人工修图放入 processed_sprites/imports/，保持工程画布尺寸。\n"
-                    "source_sprites/ 是可重建缓存；exports/ 仅按需生成。\n", encoding="utf-8")
+                    "source_sprites/ 是可重建缓存；exports/ 仅按需生成。\n",
+                    encoding="utf-8",
+                )
                 staged.rename(destination)
         return self.describe(project_id)

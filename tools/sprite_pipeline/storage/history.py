@@ -15,7 +15,6 @@ from pathlib import Path
 
 from sprite_pipeline.storage.configuration import inside
 
-
 VERSION_ID = re.compile(r"\d{20}-[0-9a-f]{8}\Z")
 
 
@@ -76,7 +75,9 @@ class ProjectHistory:
     def _snapshot(self, roots: list[str]) -> dict[str, str]:
         return {name: self._digest(path) for name, path in self._files(roots).items()}
 
-    def _restore_archive(self, archive_path: Path, before: dict[str, str], roots: list[str]) -> None:
+    def _restore_archive(
+        self, archive_path: Path, before: dict[str, str], roots: list[str]
+    ) -> None:
         try:
             with zipfile.ZipFile(archive_path) as archive:
                 if set(archive.namelist()) != set(before):
@@ -97,7 +98,9 @@ class ProjectHistory:
                     if path.is_file() and self._digest(path) == expected:
                         continue
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    with tempfile.TemporaryDirectory(prefix=".sprite-restore-", dir=path.parent) as temporary:
+                    with tempfile.TemporaryDirectory(
+                        prefix=".sprite-restore-", dir=path.parent
+                    ) as temporary:
                         staged = Path(temporary) / path.name
                         with archive.open(name) as source, staged.open("wb") as output:
                             shutil.copyfileobj(source, output)
@@ -123,9 +126,17 @@ class ProjectHistory:
                 yield
                 after = self._snapshot(roots)
                 version_id = f"{time.time_ns():020d}-{secrets.token_hex(4)}"
-                manifest = {"id": version_id, "operation": operation, "created_at": time.time(),
-                            "roots": roots, "before": before, "after": after}
-                (pending / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                manifest = {
+                    "id": version_id,
+                    "operation": operation,
+                    "created_at": time.time(),
+                    "roots": roots,
+                    "before": before,
+                    "after": after,
+                }
+                (pending / "manifest.json").write_text(
+                    json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 pending.replace(self.versions / version_id)
             except OperationNotStarted:
                 # Another writer owns the destination. Rolling back the
@@ -136,7 +147,9 @@ class ProjectHistory:
                     self._restore_archive(archive_path, before, roots)
                 except BaseException as rollback_error:
                     keep_pending = True
-                    raise OSError(f"Automatic rollback failed; backup kept at {pending}") from rollback_error
+                    raise OSError(
+                        f"Automatic rollback failed; backup kept at {pending}"
+                    ) from rollback_error
                 raise
         finally:
             if pending.exists() and not keep_pending:
@@ -153,8 +166,14 @@ class ProjectHistory:
             if directory.resolve() != directory or (directory / "manifest.json").is_symlink():
                 raise ValueError("History version cannot be a link")
             manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-            result.append({"id": manifest["id"], "operation": manifest["operation"],
-                           "created_at": manifest["created_at"], "files": len(set(manifest["before"]) | set(manifest["after"]))})
+            result.append(
+                {
+                    "id": manifest["id"],
+                    "operation": manifest["operation"],
+                    "created_at": manifest["created_at"],
+                    "files": len(set(manifest["before"]) | set(manifest["after"])),
+                }
+            )
         return result
 
     def restore(self, version_id: str, validate) -> None:
@@ -172,7 +191,9 @@ class ProjectHistory:
         for name in [*roots, *before, *after]:
             self._safe(name)
         if self._snapshot(roots) != after:
-            raise HistoryConflictError("历史版本之后这些文件已被修改，请先备份或重新载入，不能直接覆盖。")
+            raise HistoryConflictError(
+                "历史版本之后这些文件已被修改，请先备份或重新载入，不能直接覆盖。"
+            )
         with self.transaction("restore", [self._safe(name) for name in roots]):
             self._restore_archive(directory / "before.zip", before, roots)
             validate()

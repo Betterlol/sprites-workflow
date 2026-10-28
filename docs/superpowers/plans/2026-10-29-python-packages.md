@@ -35,9 +35,9 @@
 
 ## Round 3: Quality and contracts
 
-- [ ] Tighten typed results/cache interfaces and explicit public exports; remove internal legacy imports and hidden side channels.
-- [ ] Add dependency-boundary/cycle checks, public import tests and architecture documentation describing future config adapter seam.
-- [ ] Run all required suites, browser smoke against a disposable synthetic project, and fresh independent code review. Commit the final quality pass.
+- [x] Tighten typed results/cache interfaces and explicit public exports; remove internal legacy imports and hidden side channels.
+- [x] Add dependency-boundary/cycle checks, public import tests and architecture documentation describing future config adapter seam.
+- [x] Run all required suites, browser smoke against a disposable synthetic project, and code review (independent service when available, otherwise inline review). Commit the final quality pass.
 
 ## Execution record
 
@@ -47,3 +47,7 @@
 - Round 1: 148 Python tests and both Node suites passed. An old tuple unpack in prepare was caught by existing job/rollback tests and changed to named RenderResult fields.
 
 - Round 2: 149 Python tests and both Node suites passed. Project now composes session/editing/assets/export operations; configuration snapshots and saves use ConfigRepository. Legacy batch process still requires saved slices, while draft previews can render in memory. Both share pixel processing and slice storage.
+
+- Round 3: 153 Python tests, both Node suites, architecture checks and Ruff check/format passed. Chromium smoke used a temporary project and passed slicing save, repeated/cross-source runtime/display timing, warm single-frame response deltas, unchanged neighboring PNG bytes/mtimes and reload.
+- Review limitation: the independent review service returned HTTP 403 twice, so no independent review result is claimed. Inline review compared moved AST definitions and operation bodies against 0ce442e; filesystem/history/locking, CLI and export/QA algorithms remain equivalent, with intentional changes confined to delegation, config repository access, explicit render results and relocated static/default paths.
+- Browser test corrections: wait for the initial preview to establish known versions before asserting a warm delta; assert successful save responses and actual files rather than matching a fragile toast substring. No product behavior was changed to satisfy these checks.

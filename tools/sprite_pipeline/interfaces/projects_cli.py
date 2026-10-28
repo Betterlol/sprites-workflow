@@ -7,13 +7,13 @@ import json
 import sys
 from pathlib import Path
 
-from sprite_pipeline.storage.configuration import load_config
 from sprite_pipeline.application.composition_check import compare_composition
 from sprite_pipeline.application.export_check import check_export
 from sprite_pipeline.application.projects import DEFAULT_WORKSPACES, ProjectStore
 from sprite_pipeline.application.qa import render_qa
-from sprite_pipeline.domain.errors import ConflictError
 from sprite_pipeline.domain.actions import validate_editor
+from sprite_pipeline.domain.errors import ConflictError
+from sprite_pipeline.storage.configuration import load_config
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -23,75 +23,157 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("create", help="Create a self-contained empty project")
     create.add_argument("name")
-    create.add_argument("--id", help="Directory name; defaults to the project name, including Unicode")
+    create.add_argument(
+        "--id", help="Directory name; defaults to the project name, including Unicode"
+    )
     create.add_argument("--width", type=int, default=640)
     create.add_argument("--height", type=int, default=640)
-    create.add_argument("--anchor-x", type=float, default=.5)
-    create.add_argument("--anchor-y", type=float, default=.9)
+    create.add_argument("--anchor-x", type=float, default=0.5)
+    create.add_argument("--anchor-y", type=float, default=0.9)
     commands.add_parser("list")
-    for name in ("status", "validate", "apply", "save-slices", "prepare", "save", "import", "delete", "export", "qa"):
+    for name in (
+        "status",
+        "validate",
+        "apply",
+        "save-slices",
+        "prepare",
+        "save",
+        "import",
+        "delete",
+        "export",
+        "qa",
+    ):
         command = commands.add_parser(name)
         command.add_argument("project")
         if name in {"apply", "save-slices"}:
             command.add_argument("--source", required=True)
-        if name == 'save-slices':
-            command.add_argument('--extract', type=Path, help='Extraction rules JSON; defaults to saved rules')
+        if name == "save-slices":
+            command.add_argument(
+                "--extract", type=Path, help="Extraction rules JSON; defaults to saved rules"
+            )
         if name in {"apply", "save-slices", "prepare", "import", "delete"}:
-            command.add_argument("--revision", help="Expected config revision, if already inspected")
-            command.add_argument("--asset-revision", help="Expected material revision, if already inspected")
+            command.add_argument(
+                "--revision", help="Expected config revision, if already inspected"
+            )
+            command.add_argument(
+                "--asset-revision", help="Expected material revision, if already inspected"
+            )
         if name == "save":
             command.add_argument("--data", type=Path, required=True, help="Draft pipeline.json")
             command.add_argument("--revision", required=True, help="Revision returned by status")
         if name == "import":
-            command.add_argument("--kind", choices=("source", "processed", "reference"), required=True)
-            command.add_argument("--file", type=Path, action="append", required=True, help="Repeat to import multiple images")
+            command.add_argument(
+                "--kind", choices=("source", "processed", "reference"), required=True
+            )
+            command.add_argument(
+                "--file",
+                type=Path,
+                action="append",
+                required=True,
+                help="Repeat to import multiple images",
+            )
         if name == "delete":
-            command.add_argument("--kind", choices=("source", "processed", "reference"), required=True)
-            command.add_argument("--ref", action="append", required=True, dest="references", help="Repeat to delete a batch; in-use sprites are protected")
+            command.add_argument(
+                "--kind", choices=("source", "processed", "reference"), required=True
+            )
+            command.add_argument(
+                "--ref",
+                action="append",
+                required=True,
+                dest="references",
+                help="Repeat to delete a batch; in-use sprites are protected",
+            )
         if name == "export":
-            command.add_argument("--format", choices=("project", "frames", "atlas", "webp", "gif", "all"), default="project")
+            command.add_argument(
+                "--format",
+                choices=("project", "frames", "atlas", "webp", "gif", "all"),
+                default="project",
+            )
             command.add_argument("--action", action="append", dest="actions")
-            command.add_argument("--exclude-action", action="append", dest="exclude_actions",
-                                 help="Exclude an action after --action selection; repeatable; resource exports only")
-            command.add_argument("--output", type=Path, required=True, help="New ZIP file; existing files are never overwritten")
+            command.add_argument(
+                "--exclude-action",
+                action="append",
+                dest="exclude_actions",
+                help="Exclude an action after --action selection; repeatable; resource exports only",
+            )
+            command.add_argument(
+                "--output",
+                type=Path,
+                required=True,
+                help="New ZIP file; existing files are never overwritten",
+            )
         if name == "qa":
             selection = command.add_mutually_exclusive_group(required=True)
             selection.add_argument("--action", help="Inspect one saved action")
             selection.add_argument("--review", help="Inspect one saved Review")
-            selection.add_argument("--ref", action="append", dest="references",
-                                   help="Inspect processed references in the given order; repeat for each slot")
-            selection.add_argument("--sequence", type=Path,
-                                   help="JSON with ordered processed refs, duration_ms and loop")
-            command.add_argument("--mode", choices=("runtime", "display"),
-                                 help="Action playback mode; defaults to runtime")
-            command.add_argument("--output", type=Path, required=True,
-                                 help="New evidence directory; existing directories are never overwritten")
+            selection.add_argument(
+                "--ref",
+                action="append",
+                dest="references",
+                help="Inspect processed references in the given order; repeat for each slot",
+            )
+            selection.add_argument(
+                "--sequence",
+                type=Path,
+                help="JSON with ordered processed refs, duration_ms and loop",
+            )
+            command.add_argument(
+                "--mode",
+                choices=("runtime", "display"),
+                help="Action playback mode; defaults to runtime",
+            )
+            command.add_argument(
+                "--output",
+                type=Path,
+                required=True,
+                help="New evidence directory; existing directories are never overwritten",
+            )
     history = commands.add_parser("history", help="List recoverable artwork operations")
     history.add_argument("project")
     restore = commands.add_parser("restore", help="Restore a recorded artwork operation")
     restore.add_argument("project")
     restore.add_argument("version", help="Version ID returned by history")
     restore.add_argument("--revision", help="Expected config revision, if already inspected")
-    restore.add_argument("--asset-revision", help="Expected material revision, if already inspected")
-    composition = commands.add_parser("check-composition", help="Compare an action with a runtime Review or timed sequence")
+    restore.add_argument(
+        "--asset-revision", help="Expected material revision, if already inspected"
+    )
+    composition = commands.add_parser(
+        "check-composition", help="Compare an action with a runtime Review or timed sequence"
+    )
     composition.add_argument("project")
     composition.add_argument("--action", required=True, help="Complete runtime action")
     expected = composition.add_mutually_exclusive_group(required=True)
     expected.add_argument("--review", help="Saved runtime Review of the component parts")
     expected.add_argument("--sequence", type=Path, help="Explicit JSON playback sequence")
-    verify_export = commands.add_parser("check-export", help="Verify a resource ZIP against current processed sprites")
+    verify_export = commands.add_parser(
+        "check-export", help="Verify a resource ZIP against current processed sprites"
+    )
     verify_export.add_argument("project")
-    verify_export.add_argument("--archive", type=Path, required=True, help="Resource ZIP to inspect without extracting")
-    verify_export.add_argument("--format", choices=("frames", "atlas", "webp", "gif", "all"),
-                               help="Require this resource format; defaults to auto-detection")
-    verify_export.add_argument("--action", action="append", dest="actions",
-                               help="Require this action in the ZIP; repeat to check a filtered export")
+    verify_export.add_argument(
+        "--archive", type=Path, required=True, help="Resource ZIP to inspect without extracting"
+    )
+    verify_export.add_argument(
+        "--format",
+        choices=("frames", "atlas", "webp", "gif", "all"),
+        help="Require this resource format; defaults to auto-detection",
+    )
+    verify_export.add_argument(
+        "--action",
+        action="append",
+        dest="actions",
+        help="Require this action in the ZIP; repeat to check a filtered export",
+    )
     args = parser.parse_args(argv)
     try:
         store = ProjectStore(args.workspace_root)
         valid = True
         if args.command == "create":
-            result = store.create(args.name, args.id, frame_size=[args.width, args.height], anchor=[args.anchor_x, args.anchor_y])
+            result = store.create(
+                args.name,
+                args.id,
+                frame_size=[args.width, args.height],
+                anchor=[args.anchor_x, args.anchor_y],
+            )
         elif args.command == "list":
             result = {"projects": store.list()}
         else:
@@ -118,7 +200,9 @@ def main(argv: list[str] | None = None) -> int:
                 elif args.command == "export":
                     if args.format == "project":
                         if args.exclude_actions:
-                            raise ValueError("--exclude-action is not supported for project backups; choose frames, atlas, webp, gif or all")
+                            raise ValueError(
+                                "--exclude-action is not supported for project backups; choose frames, atlas, webp, gif or all"
+                            )
                         actions = args.actions or list(cfg.data["actions"])
                     else:
                         actions = cfg.select_actions(args.actions, args.exclude_actions)
@@ -129,44 +213,79 @@ def main(argv: list[str] | None = None) -> int:
                         output.write(content)
                     result = {"output": str(args.output.resolve()), "bytes": len(content)}
                 elif args.command == "qa":
-                    sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
-                    result = render_qa(cfg, action=args.action, review=args.review,
-                                       references=args.references, sequence=sequence,
-                                       mode=args.mode, output=args.output)
+                    sequence = (
+                        json.loads(args.sequence.read_text(encoding="utf-8"))
+                        if args.sequence
+                        else None
+                    )
+                    result = render_qa(
+                        cfg,
+                        action=args.action,
+                        review=args.review,
+                        references=args.references,
+                        sequence=sequence,
+                        mode=args.mode,
+                        output=args.output,
+                    )
                 elif args.command == "check-composition":
-                    sequence = json.loads(args.sequence.read_text(encoding="utf-8")) if args.sequence else None
-                    result = compare_composition(cfg, args.action, review=args.review, sequence=sequence)
+                    sequence = (
+                        json.loads(args.sequence.read_text(encoding="utf-8"))
+                        if args.sequence
+                        else None
+                    )
+                    result = compare_composition(
+                        cfg, args.action, review=args.review, sequence=sequence
+                    )
                     valid = result["valid"]
                 elif args.command == "check-export":
-                    result = check_export(cfg, args.archive, expect_format=args.format,
-                                          expected_actions=args.actions)
+                    result = check_export(
+                        cfg, args.archive, expect_format=args.format, expected_actions=args.actions
+                    )
                     valid = result["valid"]
                 else:
                     revision = args.revision or project.revision
                     assets = args.asset_revision or project.changes()["asset_revision"]
                     if args.command == "apply":
                         result = project.apply(cfg.data, revision, args.source, assets)
-                    elif args.command == 'save-slices':
-                        extract = json.loads(args.extract.read_text(encoding='utf-8')) if args.extract else cfg.source_spec(args.source)['extract']
+                    elif args.command == "save-slices":
+                        extract = (
+                            json.loads(args.extract.read_text(encoding="utf-8"))
+                            if args.extract
+                            else cfg.source_spec(args.source)["extract"]
+                        )
                         result = project.save_slices(args.source, extract, revision, assets)
                     elif args.command == "prepare":
                         result = project.prepare(cfg.data, revision, assets)
                     elif args.command == "delete":
-                        result = project.delete(args.kind, args.references, cfg.data, revision, assets)
+                        result = project.delete(
+                            args.kind, args.references, cfg.data, revision, assets
+                        )
                     else:
                         result = project.state()
                         imported, failed, skipped = [], [], []
                         for index, path in enumerate(args.file):
                             try:
-                                result = project.upload(args.kind, path.name, path.read_bytes(), result["data"], revision, assets)
+                                result = project.upload(
+                                    args.kind,
+                                    path.name,
+                                    path.read_bytes(),
+                                    result["data"],
+                                    revision,
+                                    assets,
+                                )
                                 imported.append(path.name)
                                 revision, assets = result["revision"], result["asset_revision"]
                             except (ValueError, OSError, KeyError, TypeError) as error:
                                 failed.append({"file": path.name, "error": str(error)})
                                 if isinstance(error, ConflictError):
-                                    skipped = [str(p) for p in args.file[index + 1:]]
+                                    skipped = [str(p) for p in args.file[index + 1 :]]
                                     break
-                        result = {**result, "imported": imported, "failed": failed, "skipped": skipped}
+                        result = {
+                            **result,
+                            "imported": imported,
+                            "failed": failed,
+                            "skipped": skipped,
+                        }
                         valid = not failed
         print(json.dumps(result, ensure_ascii=False, indent=None if args.json else 2))
         return 0 if valid else 1

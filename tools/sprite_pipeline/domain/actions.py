@@ -1,9 +1,11 @@
 """Runtime, display and review composition shared by all clients."""
-from sprite_pipeline.domain.animation import playback
-from sprite_pipeline.domain.validation import integer, NAME
-from sprite_pipeline.domain.models import ActionConfig
 
-def action_steps(cfg: ActionConfig, name: str, mode: str = "runtime") -> list[dict]:
+from sprite_pipeline.domain.animation import playback
+from sprite_pipeline.domain.models import ActionConfig, ActionStep, ReviewStep
+from sprite_pipeline.domain.validation import NAME, integer
+
+
+def action_steps(cfg: ActionConfig, name: str, mode: str = "runtime") -> list[ActionStep]:
     if name not in cfg.data["actions"]:
         raise ValueError(f"Unknown action: {name}")
     spec = cfg.action(name)
@@ -17,10 +19,13 @@ def action_steps(cfg: ActionConfig, name: str, mode: str = "runtime") -> list[di
         durations = [round(1000 / spec.get("fps", 12))] * len(order)
     else:
         raise ValueError("Playback mode must be runtime or display")
-    return [{"ref": references[index], "action": name, "frame": index, "duration_ms": duration}
-            for index, duration in zip(order, durations)]
+    return [
+        {"ref": references[index], "action": name, "frame": index, "duration_ms": duration}
+        for index, duration in zip(order, durations)
+    ]
 
-def review_steps(cfg: ActionConfig, review: dict, *, allow_empty: bool = False) -> list[dict]:
+
+def review_steps(cfg: ActionConfig, review: dict, *, allow_empty: bool = False) -> list[ReviewStep]:
     if not isinstance(review, dict) or not isinstance(review.get("clips", []), list):
         raise ValueError("A review must contain a clips array")
     if not isinstance(review.get("loop", True), bool):
@@ -47,14 +52,21 @@ def review_steps(cfg: ActionConfig, review: dict, *, allow_empty: bool = False) 
         if not 0 <= start <= end < len(steps):
             raise ValueError(f"{name}: clip range must be within 0..{len(steps) - 1}")
         for repetition in range(repeat):
-            for position, step in enumerate(steps[start:end + 1]):
-                result.append({**step, "clip": clip_index, "repetition": repetition,
-                               "boundary": position == 0})
+            for position, step in enumerate(steps[start : end + 1]):
+                result.append(
+                    {
+                        **step,
+                        "clip": clip_index,
+                        "repetition": repetition,
+                        "boundary": position == 0,
+                    }
+                )
                 if len(result) > 10000:
                     raise ValueError("Review exceeds 10,000 playback steps")
     if not result and not allow_empty:
         raise ValueError("Add at least one nonempty action to the review")
     return result
+
 
 def validate_editor(cfg: ActionConfig) -> None:
     for name in cfg.data["actions"]:

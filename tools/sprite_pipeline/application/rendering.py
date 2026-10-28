@@ -2,18 +2,22 @@
 
 The owning project session serializes calls with its project lock.
 """
+
 import hashlib
 import json
 from dataclasses import dataclass
+
 from PIL import Image
-from sprite_pipeline.storage.configuration import Config, inside
+
 from sprite_pipeline.domain.models import CanvasSpec, SliceDescriptor
-from sprite_pipeline.storage.identities import previous_slices, slice_ids
 from sprite_pipeline.imaging.extraction import cut_frames
 from sprite_pipeline.imaging.processing import process_frames
-from sprite_pipeline.storage.files import read_image
-from sprite_pipeline.storage.slices import read_slices, extraction_fingerprint
 from sprite_pipeline.storage.cache import RenderCache
+from sprite_pipeline.storage.configuration import Config, inside
+from sprite_pipeline.storage.files import read_image
+from sprite_pipeline.storage.identities import previous_slices, slice_ids
+from sprite_pipeline.storage.slices import extraction_fingerprint, read_slices
+
 
 @dataclass(frozen=True)
 class RenderResult:
@@ -24,11 +28,14 @@ class RenderResult:
     scale: float
     versions: dict[str, str]
 
+
 class RenderService:
-    def __init__(self):
-        self._native_cache = RenderCache()
-        self._extracted_cache = RenderCache()
-        self._render_cache = RenderCache()
+    def __init__(self) -> None:
+        self._native_cache: RenderCache[Image.Image] = RenderCache()
+        self._extracted_cache: RenderCache[tuple[dict[str, Image.Image], list[SliceDescriptor]]] = (
+            RenderCache()
+        )
+        self._render_cache: RenderCache[Image.Image] = RenderCache()
 
     def render(self, cfg: Config, filename: str, stage: str = "process") -> RenderResult:
         if stage not in {"extract", "process"}:
@@ -37,23 +44,40 @@ class RenderService:
             raise ValueError("Unknown source image")
         cached = read_slices(cfg, filename, self._native_cache)
         if cached is None:
-            extraction_key = extraction_fingerprint(cfg, filename) + json.dumps(previous_slices(cfg, filename), sort_keys=True)
+            extraction_key = extraction_fingerprint(cfg, filename) + json.dumps(
+                previous_slices(cfg, filename), sort_keys=True
+            )
             cached = self._extracted_cache.get(extraction_key)
             if cached is None:
-                raw, boxes = cut_frames(read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"])
+                raw, boxes = cut_frames(
+                    read_image(inside(cfg.source, filename)), cfg.source_spec(filename)["extract"]
+                )
                 keys = slice_ids(cfg, filename, boxes)
                 images = dict(zip(keys, raw))
-                descriptors = [{"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)]
+                descriptors = [
+                    {"file": f"{key}.png", "source_box": box} for key, box in zip(keys, boxes)
+                ]
                 cached = (images, descriptors)
-                self._extracted_cache.put(extraction_key, cached, sum(image.width * image.height * 4 for image in raw))
+                self._extracted_cache.put(
+                    extraction_key, cached, sum(image.width * image.height * 4 for image in raw)
+                )
             images, descriptors = cached
         else:
             images, descriptors = cached
         if stage == "extract":
             frames = {f"{key}.png": image for key, image in images.items()}
-            versions = {key: hashlib.sha256(image.tobytes() + str(image.size).encode()).hexdigest() for key, image in frames.items()}
+            versions = {
+                key: hashlib.sha256(image.tobytes() + str(image.size).encode()).hexdigest()
+                for key, image in frames.items()
+            }
             scale = 1.0
         else:
-            processed = process_frames(CanvasSpec(cfg.size, cfg.anchor), filename, cfg.source_spec(filename)['process'], images, cache=self._render_cache)
+            processed = process_frames(
+                CanvasSpec(cfg.size, cfg.anchor),
+                filename,
+                cfg.source_spec(filename)["process"],
+                images,
+                cache=self._render_cache,
+            )
             frames, scale, versions = processed.frames, processed.scale, processed.versions
         return RenderResult(cfg, images, frames, descriptors, scale, versions)

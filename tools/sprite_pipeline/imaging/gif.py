@@ -36,9 +36,16 @@ def encode_gif(images: list[Image.Image], durations: list[int], loop: int) -> by
         raise ValueError("GIF loop count is out of range")
     frames = [_indexed_frame(image) for image in images]
     ticks = [max(20, round(duration / 10) * 10) for duration in durations]
-    options = {"format": "GIF", "save_all": True, "append_images": frames[1:],
-               "duration": ticks, "disposal": 2, "transparency": 0,
-               "optimize": False, "interlace": False}
+    options = {
+        "format": "GIF",
+        "save_all": True,
+        "append_images": frames[1:],
+        "duration": ticks,
+        "disposal": 2,
+        "transparency": 0,
+        "optimize": False,
+        "interlace": False,
+    }
     # GIF's finite loop value counts repeats after the first pass. WebP's
     # value counts total passes; an absent GIF extension means one pass.
     if loop == 0:
@@ -49,5 +56,7 @@ def encode_gif(images: list[Image.Image], durations: list[int], loop: int) -> by
     try:
         frames[0].save(output, **options)
     except struct.error as error:
-        raise ValueError("GIF merged frame duration exceeds its limit; shorten repeated holds") from error
+        raise ValueError(
+            "GIF merged frame duration exceeds its limit; shorten repeated holds"
+        ) from error
     return output.getvalue()

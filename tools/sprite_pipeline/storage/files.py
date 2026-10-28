@@ -26,7 +26,9 @@ def write_json(path: Path, payload: dict) -> None:
         staged.replace(path)
 
 
-def frame_changes(directory: Path, frames: dict[str, Image.Image], owned: str) -> tuple[set[str], list[Path]]:
+def frame_changes(
+    directory: Path, frames: dict[str, Image.Image], owned: str
+) -> tuple[set[str], list[Path]]:
     changed = set()
     for name, image in frames.items():
         try:
@@ -35,15 +37,26 @@ def frame_changes(directory: Path, frames: dict[str, Image.Image], owned: str) -
                 changed.add(name)
         except (OSError, ValueError):
             changed.add(name)
-    stage = directory / '_stage.json'
-    old_names = json.loads(stage.read_text(encoding='utf-8')).get('files', []) if stage.exists() else []
-    removed = [path for path in directory.glob('*.png') if path.name not in frames
-               and (re.fullmatch(owned, path.name) or path.name in old_names)]
+    stage = directory / "_stage.json"
+    old_names = (
+        json.loads(stage.read_text(encoding="utf-8")).get("files", []) if stage.exists() else []
+    )
+    removed = [
+        path
+        for path in directory.glob("*.png")
+        if path.name not in frames and (re.fullmatch(owned, path.name) or path.name in old_names)
+    ]
     return changed, removed
 
 
-def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, owned: str, metadata: dict,
-                   write_names: set[str] | None = None) -> None:
+def replace_frames(
+    directory: Path,
+    frames: dict[str, Image.Image | Path],
+    *,
+    owned: str,
+    metadata: dict,
+    write_names: set[str] | None = None,
+) -> None:
     """Render/validate everything before replacing owned PNGs for one item.
 
     Extra review notes and images with unrelated names are left alone. This is
@@ -59,9 +72,15 @@ def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, ow
                 shutil.copyfile(frame, staged / name)
             else:
                 frame.save(staged / name, optimize=True)
-        (staged / "_stage.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (staged / "_stage.json").write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         previous = directory / "_stage.json"
-        old_names = json.loads(previous.read_text(encoding="utf-8")).get("files", []) if previous.exists() else []
+        old_names = (
+            json.loads(previous.read_text(encoding="utf-8")).get("files", [])
+            if previous.exists()
+            else []
+        )
         for old in directory.glob("*.png"):
             if old.name not in frames and (re.fullmatch(owned, old.name) or old.name in old_names):
                 old.unlink()
@@ -71,10 +90,18 @@ def replace_frames(directory: Path, frames: dict[str, Image.Image | Path], *, ow
 
 def numbered_frames(directory: Path, action: str) -> list[Path]:
     pattern = re.compile(re.escape(action) + r"_(\d+)\.png\Z")
-    matches = [(int(match[1]), path) for path in directory.glob("*.png") if (match := pattern.fullmatch(path.name))]
+    matches = [
+        (int(match[1]), path)
+        for path in directory.glob("*.png")
+        if (match := pattern.fullmatch(path.name))
+    ]
     matches.sort(key=lambda entry: entry[0])
     if not matches:
-        raise FileNotFoundError(f"No final sprites in {directory}; run select or add numbered PNGs first")
+        raise FileNotFoundError(
+            f"No final sprites in {directory}; run select or add numbered PNGs first"
+        )
     if [index for index, _ in matches] != list(range(len(matches))):
-        raise ValueError(f"{directory}: frame numbers must be contiguous from 0; run select to renumber")
+        raise ValueError(
+            f"{directory}: frame numbers must be contiguous from 0; run select to renumber"
+        )
     return [path for _, path in matches]

@@ -1,8 +1,11 @@
 """Cut native image regions; independent of config files and output paths."""
+
 import numpy as np
 from PIL import Image
 from scipy import ndimage
+
 from sprite_pipeline.domain.validation import integer
+
 
 def bbox(mask: np.ndarray) -> tuple[int, int, int, int]:
     ys, xs = np.where(mask)
@@ -10,14 +13,18 @@ def bbox(mask: np.ndarray) -> tuple[int, int, int, int]:
         raise ValueError("Cannot extract an empty alpha component")
     return int(xs.min()), int(ys.min()), int(xs.max() + 1), int(ys.max() + 1)
 
+
 def distance(box, other) -> float:
     dx = max(box[0] - other[2], other[0] - box[2], 0)
     dy = max(box[1] - other[3], other[1] - box[3], 0)
     return (dx * dx + dy * dy) ** 0.5
 
+
 def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image], list[tuple]]:
     if ("cols" in spec) != ("rows" in spec):
-        raise ValueError("Provide both extract.cols and extract.rows, or omit both for automatic component layout")
+        raise ValueError(
+            "Provide both extract.cols and extract.rows, or omit both for automatic component layout"
+        )
     cols = integer(spec["cols"], "extract.cols", 1) if "cols" in spec else None
     rows = integer(spec["rows"], "extract.rows", 1) if "rows" in spec else None
     threshold = integer(spec.get("alpha_threshold", 16), "extract.alpha_threshold", 1)
@@ -26,7 +33,11 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
     min_pixels = integer(spec.get("min_component_pixels", 80), "extract.min_component_pixels", 1)
     major_pixels = integer(spec.get("major_min_pixels", 10_000), "extract.major_min_pixels", 1)
     fraction = spec.get("major_fraction", 0.02)
-    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or not 0 <= fraction <= 1:
+    if (
+        isinstance(fraction, bool)
+        or not isinstance(fraction, (int, float))
+        or not 0 <= fraction <= 1
+    ):
         raise ValueError("extract.major_fraction must be between 0 and 1")
     alpha = np.asarray(source.getchannel("A"))
     opaque = alpha >= threshold
@@ -45,7 +56,9 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
         raise ValueError("split_widest requires explicit cols and rows")
     if split is not None and len(major) == expected - 1 and major:
         overlap = integer(split.get("overlap", 0), "extract.split_widest.overlap")
-        widest_index = max(range(len(major)), key=lambda i: major[i]["bbox"][2] - major[i]["bbox"][0])
+        widest_index = max(
+            range(len(major)), key=lambda i: major[i]["bbox"][2] - major[i]["bbox"][0]
+        )
         widest = major.pop(widest_index)
         x0, _, x1, _ = widest["bbox"]
         mask = widest["mask"]
@@ -55,14 +68,23 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
         for part in (mask & (xs <= seam + overlap), mask & (xs >= seam - overlap)):
             major.append({"mask": part, "bbox": bbox(part), "size": int(part.sum())})
     if not major:
-        raise ValueError("No character silhouettes found; adjust extraction thresholds or use grid/boxes/image")
+        raise ValueError(
+            "No character silhouettes found; adjust extraction thresholds or use grid/boxes/image"
+        )
     if expected is not None and len(major) != expected:
-        raise ValueError(f"Expected {expected} character silhouettes, found {len(major)}; adjust extraction config or use explicit boxes")
+        raise ValueError(
+            f"Expected {expected} character silhouettes, found {len(major)}; adjust extraction config or use explicit boxes"
+        )
     major.sort(key=lambda item: (item["bbox"][1] + item["bbox"][3]) / 2)
     ordered = []
     if rows is not None:
         for row in range(rows):
-            ordered.extend(sorted(major[row * cols:(row + 1) * cols], key=lambda item: (item["bbox"][0] + item["bbox"][2]) / 2))
+            ordered.extend(
+                sorted(
+                    major[row * cols : (row + 1) * cols],
+                    key=lambda item: (item["bbox"][0] + item["bbox"][2]) / 2,
+                )
+            )
     else:
         # Without an authored layout, group figures whose vertical bounds overlap
         # by at least half the smaller figure, then order each row horizontally.
@@ -92,6 +114,7 @@ def component_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image]
         frames.append(Image.fromarray(pixels))
         boxes.append(box)
     return frames, boxes
+
 
 def cut_frames(source: Image.Image, spec: dict) -> tuple[list[Image.Image], list[tuple]]:
     method = spec.get("method", "components")

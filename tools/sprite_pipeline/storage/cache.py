@@ -1,21 +1,25 @@
 """Small per-project LRU caches. Entries are disposable, never authoritative assets."""
+
 from collections import OrderedDict
+from typing import Generic, TypeVar
+
+Value = TypeVar("Value")
 
 
-class RenderCache:
-    def __init__(self, limit=64 * 1024 * 1024):
+class RenderCache(Generic[Value]):
+    def __init__(self, limit: int = 64 * 1024 * 1024) -> None:
         self.limit = limit
         self.bytes = 0
-        self.entries = OrderedDict()
+        self.entries: OrderedDict[str, tuple[Value, int]] = OrderedDict()
 
-    def get(self, key):
+    def get(self, key: str) -> Value | None:
         entry = self.entries.get(key)
         if entry is None:
             return None
         self.entries.move_to_end(key)
         return entry[0]
 
-    def put(self, key, value, size):
+    def put(self, key: str, value: Value, size: int) -> None:
         previous = self.entries.pop(key, None)
         if previous is not None:
             self.bytes -= previous[1]
