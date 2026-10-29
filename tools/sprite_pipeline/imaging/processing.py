@@ -35,7 +35,12 @@ def offset_pair(value, label: str) -> tuple[float, float]:
 
 def normalize(image: Image.Image, cfg: CanvasSpec, settings: dict, scale: float) -> Image.Image:
     mode = settings.get("mode", "anchor")
+    scale_x = positive(settings.get("scale_x", 1.0), "process.scale_x")
     if mode == "copy":
+        if scale_x != 1:
+            raise ValueError(
+                "copy mode requires process.scale_x = 1; use anchor or contain to resize"
+            )
         if image.size != cfg.size:
             raise ValueError(f"copy mode requires {cfg.size}, got {image.size}")
         return image
@@ -53,8 +58,11 @@ def normalize(image: Image.Image, cfg: CanvasSpec, settings: dict, scale: float)
         scale = min(cfg.size[0] / image.width, cfg.size[1] / image.height) * scale
     else:
         raise ValueError(f"Unknown processing mode: {mode}")
-    # Keep a single scale for the action; individual overrides are explicit.
-    size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
+    # Horizontal adjustment follows the resolved uniform scale; height and anchors stay shared.
+    size = (
+        max(1, round(cropped.width * scale * scale_x)),
+        max(1, round(cropped.height * scale)),
+    )
     cropped = cropped.resize(size, Image.Resampling.LANCZOS)
     dx, dy = offset_pair(settings.get("offset", [0, 0]), "process.offset")
     width, height = cfg.size

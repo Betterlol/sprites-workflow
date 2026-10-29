@@ -253,6 +253,12 @@ def config_from_data(data: dict, path: Path, output_root: Path | None = None) ->
             not isinstance(value, dict) for value in overrides.values()
         ):
             raise ValueError("process.overrides must map sprite IDs to processing objects")
+        process = settings.get("process", {})
+        if "scale_x" in process:
+            positive(process["scale_x"], "process.scale_x")
+        for sprite_id, override in overrides.items():
+            if "scale_x" in override:
+                positive(override["scale_x"], f"process.overrides.{sprite_id}.scale_x")
         split = settings.get("extract", {}).get("split_widest")
         if split is not None and not isinstance(split, dict):
             raise ValueError("extract.split_widest must be an object")

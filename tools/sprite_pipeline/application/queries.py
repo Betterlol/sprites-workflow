@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import json
-
 from PIL import Image
 
 from sprite_pipeline.application.contracts import QueryContext
+from sprite_pipeline.application.materials import source_material_state
 from sprite_pipeline.application.presentation import image_url
 from sprite_pipeline.domain.resources import sprite_users
 from sprite_pipeline.storage.configuration import (
     REFERENCE_IMAGE_SUFFIXES,
     inside,
-    source_fingerprint,
 )
 
 REFERENCE_DIRS = ("references", "reference")
@@ -56,21 +54,15 @@ def project_state(session: QueryContext) -> dict:
             path = inside(cfg.source, filename)
             with Image.open(path) as image:
                 size = list(image.size)
-            directory = inside(root, cfg.source_id(filename))
-            stage_path = directory / "_stage.json"
-            stage = (
-                json.loads(stage_path.read_text(encoding="utf-8")) if stage_path.exists() else {}
-            )
-            fingerprint = stage.get("fingerprint")
+            prefix = cfg.source_id(filename) + "/"
+            present_files = {a["ref"][len(prefix) :] for a in assets if a["ref"].startswith(prefix)}
             sources.append(
                 {
                     "file": filename,
                     "url": image_url("source", filename, path, session.project_id),
                     "size": size,
-                    "count": sum(
-                        a["ref"].startswith(cfg.source_id(filename) + "/") for a in assets
-                    ),
-                    "stale": bool(fingerprint and fingerprint != source_fingerprint(cfg, filename)),
+                    "count": len(present_files),
+                    **source_material_state(cfg, filename, present_files),
                 }
             )
         legacy_count = len(list(cfg.directory("sprites").rglob("*.png")))

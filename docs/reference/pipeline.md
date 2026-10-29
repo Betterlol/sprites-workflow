@@ -31,7 +31,11 @@ boxes 与 region_ids 一一对应；identities 记录区域来源，next_id 分�
 
 处理 mode 支持 anchor、contain、copy。scale、fit_height、max_scale 决定整组缩放；offset、clamp_y、padding、overflow 控制放置与越界。overrides.<sprite_id> 提供单帧覆盖；单帧 scale 是绝对覆盖而非乘数，留空继承整组。
 
+`scale_x` 是正有限横向倍率，默认 `1`。它在 `scale` / `fit_height` 的最终等比倍率之后只调整宽度，高度不变，并沿用当前模式的水平中心、脚底或居中定位与越界规则。整组可配置 `process.scale_x`；`process.overrides.<sprite_id>.scale_x` 绝对覆盖该帧的横向倍率，删除此字段即继承整组值，不会再次乘上整组横向倍率。`copy` 模式保持原像素，只接受 `scale_x = 1`，需要压宽或拉宽时改用 `anchor` 或 `contain`。
+
 fit_height 按单张原图最高的完整轮廓计算共享倍率，不能保证跨原图身体同尺度；轮廓锚点也不等于脚底或身体中心。
+
+工程状态快照的 `sources[].material_status` 提供 `key`、`label`、`reason` 和 `pending`。`key` 为 `synced`（已同步）、`pending`（待更新）、`unprocessed`（未处理）或 `unknown`（未核验）；`pending` 布尔字段在状态为 `pending` 或 `unprocessed` 时为真，其余为假。核验依据是处理记录、帧清单完整性及原图/规则指纹，不是视觉验收。旧记录只保存指纹摘要，变化后无法反推出具体是哪项旧参数不同；缺少有效记录时标记未核验。旧 `stale` 字段保留原来的指纹比较语义。
 
 ## 阶段和写入边界
 

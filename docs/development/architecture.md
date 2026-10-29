@@ -18,6 +18,7 @@
 
 - `session.ProjectSession`：工程生命周期、锁、版本检查、草稿约束和渲染器。
 - `queries.project_state`：素材清单、尺寸与边界缓存、工程快照；只依赖 `QueryContext` 契约。
+- `materials.source_material_state`：依据已保存处理记录与帧清单解释原图组的更新状态，不生成或修改素材。
 - `editing.EditingOperations`：保存草稿、独立保存切割、增量预览、应用调整、准备缺失素材。
 - `assets.AssetOperations`：导入、删除和显式旧素材迁移。
 - `exporting.ExportOperations`：临时目录中的只读导出、进度及取消。

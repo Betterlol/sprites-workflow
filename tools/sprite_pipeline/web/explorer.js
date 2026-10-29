@@ -1,3 +1,4 @@
+import {sourceMaterialStatus} from './material-status.js';
 // One persistent project directory shared by every editing mode.
 export function createExplorer(api) {
   const {state,$,escape,composition}=api;
@@ -6,14 +7,14 @@ export function createExplorer(api) {
   function render() {
     const groups=[
       {key:'reference',name:'参考图',items:state.references.map(item=>({id:item.ref,name:item.file,url:item.url}))},
-      {key:'source',name:'原图素材',items:state.sources.map(item=>({id:item.file,name:item.file,url:item.url}))},
+      {key:'source',name:'原图素材',items:state.sources.map(item=>({id:item.file,name:item.file,url:item.url,status:sourceMaterialStatus(item,state.data,state.savedData)}))},
       {key:'action',name:'动作列表',items:Object.entries(state.data.actions).map(([id,item])=>({id,name:item.name || id}))},
       {key:'review',name:'衔接序列',items:Object.entries(state.data.workbench?.reviews || {}).map(([id,item])=>({id,name:item.name || id}))},
     ];
     $('#project-tree').innerHTML=groups.map(group=>`<details data-folder="${group.key}" ${closed.has(group.key) ? '' : 'open'}><summary>${folderIcon}<span>${group.name}</span><small>${group.items.length}</small><button data-create="${group.key}" title="添加${group.name}" aria-label="添加${group.name}">＋</button></summary><div class="directory-children">${group.items.map(item=>{
       const selected=state.mode === group.key && state[group.key] === item.id;
       const resource=['action','review'].includes(group.key);
-      return `<div class="directory-row ${selected ? 'selected' : ''}"><button data-entry="${escape(item.id)}" data-kind="${group.key}" ${resource ? 'draggable="true"' : ''} title="${escape(item.name)}">${item.url ? `<img src="${escape(item.url)}" alt="">` : '<span class="directory-file">▧</span>'}<span>${escape(item.name)}</span></button>${resource ? `<button class="directory-insert" data-insert="${escape(item.id)}" data-kind="${group.key}" title="加入当前组合" aria-label="将 ${escape(item.name)} 加入当前组合">＋</button>` : ''}<button class="directory-delete text-button danger" data-delete-entry="${escape(item.id)}" data-kind="${group.key}" title="删除 ${escape(item.name)}" aria-label="删除 ${escape(item.name)}">删除</button></div>`;
+      return `<div class="directory-row ${selected ? 'selected' : ''}"><button data-entry="${escape(item.id)}" data-kind="${group.key}" ${resource ? 'draggable="true"' : ''} title="${escape(item.name + (item.status ? ' · ' + item.status.label + '：' + item.status.reason : ''))}">${item.url ? `<img src="${escape(item.url)}" alt="">` : '<span class="directory-file">▧</span>'}<span class="directory-label"><span class="directory-name">${escape(item.name)}</span>${item.status ? `<small class="material-badge" data-status="${item.status.key}">${escape(item.status.label)}</small>` : ''}</span></button>${resource ? `<button class="directory-insert" data-insert="${escape(item.id)}" data-kind="${group.key}" title="加入当前组合" aria-label="将 ${escape(item.name)} 加入当前组合">＋</button>` : ''}<button class="directory-delete text-button danger" data-delete-entry="${escape(item.id)}" data-kind="${group.key}" title="删除 ${escape(item.name)}" aria-label="删除 ${escape(item.name)}">删除</button></div>`;
     }).join('') || '<p class="directory-empty">暂无内容</p>'}</div></details>`).join('');
     $('#directory-project-name').textContent=state.data.project?.name || state.data.character;
     $('#project-tree').querySelectorAll('[data-folder]').forEach(details=>details.ontoggle=()=>{ if (details.open) closed.delete(details.dataset.folder); else closed.add(details.dataset.folder); });
@@ -33,5 +34,14 @@ export function createExplorer(api) {
     });
     $('#project-tree').querySelectorAll('[data-insert]').forEach(button=>button.onclick=()=>composition.insert([{kind:button.dataset.kind === 'action' ? 'action' : 'sequence',ref:button.dataset.insert}]));
   }
-  return {render};
+  function refreshStatuses() {
+    $('#project-tree').querySelectorAll('[data-entry][data-kind="source"]').forEach(button=>{
+      const source=state.sources.find(item=>item.file === button.dataset.entry);
+      if (!source) return;
+      const status=sourceMaterialStatus(source,state.data,state.savedData), badge=button.querySelector('.material-badge');
+      button.title=`${source.file} · ${status.label}：${status.reason}`;
+      if (badge) { badge.textContent=status.label; badge.dataset.status=status.key; }
+    });
+  }
+  return {render,refreshStatuses};
 }

@@ -1,6 +1,7 @@
 import {createExportDisplay} from './export-display.js';
 import {createExplorer} from './explorer.js';
 import {deletionImpact,detachForDeletion} from './resource-deletion.js';
+import {sourceMaterialStatus,summarizeMaterials} from './material-status.js';
 import {clone, actionSteps, reviewSteps, defaultReviews, merge, roundMs} from './model.js';
 import {createCompositionUI} from './composition.js';
 import {allResources,resourceKey,resourceUsers,slotsOf,renameResource,reconcileCompositeAnimations,validateComposition} from './resources.js';
@@ -167,9 +168,12 @@ function updateSaveStatus() {
   $('#preview-state').textContent = state.mode === 'source' && state.sourceView === 'original'
     ? `切割预览：${state.previewError ? '预览失败' : currentPreview ? `${state.preview.frames.length} 个区域` : '等待预览'}` : `处理预览：${preview}`;
   $('#preview-state').dataset.state = state.previewError ? 'error' : sourceChanged ? 'pending' : 'quiet';
-  const stale = state.sources.filter(source => source.stale).length;
-  $('#material-state').textContent = stale ? `素材：${stale} 张待更新` : '素材：已同步';
-  $('#material-state').dataset.state = stale ? 'pending' : 'ready';
+  const materials = summarizeMaterials(state.sources,state.data,state.savedData);
+  $('#material-state').textContent = materials.pendingCount ? `素材：${materials.pendingCount} 组待更新` : materials.unknownCount ? `素材：${materials.unknownCount} 组未核验` : '素材：已同步';
+  $('#material-state').dataset.state = materials.pendingCount || materials.unknownCount ? 'pending' : 'ready';
+  const pending = materials.items.filter(item=>item.status.pending || item.status.key === 'unknown');
+  $('#material-state').title = (pending.length ? pending.map(({source,status})=>`${source.file} · ${status.label}：${status.reason}`).join('\n')+'\n' : '')+'点击查看全部原图组的更新状态；保存参数不会重新生成处理帧。';
+  explorer.refreshStatuses();
   $('#undo').disabled = !state.history.length; $('#redo').disabled = !state.future.length;
   $('#save').disabled = state.busy || !dirty();
   $('#prepare').disabled = state.busy || !state.sources.length;
@@ -224,6 +228,22 @@ function reconcileMaterials() {
   const availableResources=new Set([...state.assets.map(item=>`sprite:${item.ref}`),...allResources(state.data).map(resourceKey)]);
   state.assetSelection = new Set([...state.assetSelection].filter(ref=>availableResources.has(ref)));
 }
+function showMaterialStatus() {
+  if (!state.data) return;
+  const summary=summarizeMaterials(state.sources,state.data,state.savedData);
+  const priority={pending:0,unprocessed:1,unknown:2,synced:3};
+  const items=[...summary.items].sort((a,b)=>priority[a.status.key]-priority[b.status.key]);
+  $('#material-summary').textContent=`共 ${items.length} 组原图 · ${summary.pendingCount} 组待更新 · ${summary.unknownCount} 组未核验。这里按原图组统计，一组可能包含多张单帧。`;
+  $('#material-list').innerHTML=items.map(({source,status})=>`<div class="material-row" role="listitem"><div><strong>${escape(source.file)}</strong><span class="material-badge" data-status="${status.key}">${escape(status.label)}</span><p>${escape(status.reason)}</p><small>已生成 ${source.count || 0} 张处理帧</small></div><button data-material-source="${escape(source.file)}">${source.count ? '打开调整' : '打开切割'}</button></div>`).join('') || '<p class="hint">尚未导入原图。</p>';
+  $('#material-list').querySelectorAll('[data-material-source]').forEach(button=>button.onclick=()=>{
+    const source=state.sources.find(item=>item.file === button.dataset.materialSource);
+    if (!source) return;
+    $('#material-dialog').close(); state.source=source.file; mode('source',source.count ? 'processed' : 'original'); showPane('canvas',true);
+  });
+  $('#material-dialog').showModal();
+}
+$('#material-state').onclick=showMaterialStatus;
+$('#material-close').onclick=()=>$('#material-dialog').close();
 async function loadProject() {
   const snapshot = await api('project'); setSnapshot(snapshot);
   suggestReviews();
@@ -402,6 +422,8 @@ setInterval(checkExternalChanges,12000);
 async function save() {
   return task('正在保存工程…', async () => {
     const result = await api('save', payload());
+    // Preserve pending material evidence even if the follow-up snapshot cannot be read.
+    state.sources=summarizeMaterials(state.sources,state.data,state.savedData).items.map(({source,status})=>({...source,material_status:status}));
     state.revision = result.revision; state.saved = JSON.stringify(state.data); state.savedData = clone(state.data);
     try {
       const snapshot = await api('project');
@@ -678,7 +700,9 @@ function sourceInspector() {
   if (!state.source) return '<div class="inspector-empty"><h3>从一张原图开始</h3><p>点击左上角 ＋ 导入动作原图，再选择自动识别、网格或手动框选。</p></div>';
   const {extract,process} = resolvedSource(), slice = state.sourceView === 'original' ? regionFrames()[state.selected] : selectedSlice();
   const override = process.overrides?.[slice?.id] || {};
-  const error = state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '';
+  const material=sourceMaterialStatus(sourceInfo(),state.data,state.savedData);
+  const frameCopy=(override.mode || process.mode || 'anchor') === 'copy', groupCopy=process.mode === 'copy';
+  const error = (state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '') + section('素材状态',info('当前原图组',material.label)+'<p class="hint">'+escape(material.reason)+'</p>');
   if (state.sourceView === 'processed' && slice && sourceForFrame(state.sources,slice.ref)?.file !== state.source)
     return error + section('只读素材',info('引用',slice.ref) + '<p class="hint">此帧没有可直接调整的原图切片。可以播放对照，选择有原图的帧后再调整。</p>');
   if (state.sourceView === 'original') {
@@ -694,9 +718,10 @@ function sourceInspector() {
       '<div class="inspector-next"><button id="save-slices" class="wide">保存当前切割</button><button id="view-processed" class="primary wide">下一步：调整帧 →</button><p class="hint">仅保存当前原图的切割与原始切片；其他草稿保持未保存。</p></div>';
   }
   return error + section('单帧微调',slice ? `<span class="selected-ref">${escape(slice.ref)}</span><div class="field-row">${label('水平偏移',number('override-x',override.offset?.[0] ?? process.offset?.[0] ?? 0,'step="1"'))}${label('垂直偏移',number('override-y',override.offset?.[1] ?? process.offset?.[1] ?? 0,'step="1"'))}</div>` +
-      label('独立缩放倍率',number('override-scale',override.scale ?? '', 'min="0.01" max="10" step="0.01" placeholder="继承整组"')) + '<p class="hint">可直接拖动画面中的当前帧。单帧设置覆盖整组值；留空缩放可继承整组。</p><button id="clear-override" class="wide">重置本帧</button>' : '<p class="hint">正在准备预览。选择下方原帧后可单独调整。</p>') +
+      label('独立缩放倍率',number('override-scale',override.scale ?? '', 'min="0.01" max="10" step="0.01" placeholder="继承整组"')) + label('水平宽度倍率',number('override-scale-x',override.scale_x ?? '', `min="0.01" max="10" step="0.01" placeholder="继承整组（${escape(process.scale_x ?? 1)}）" ${frameCopy ? 'disabled' : ''}`)) + `<p class="hint">${frameCopy ? 'copy 模式保留原像素，不支持宽度变形；切换为锚点对齐或适应画布后可调整。' : '水平倍率 1 保持宽度，0.8 压窄到 80%，高度不变；会改变身体和道具比例，请连播检查。'}可直接拖动当前帧，倍率留空继承整组。</p>` + '<button id="clear-override" class="wide">重置本帧</button>' : '<p class="hint">正在准备预览。选择下方原帧后可单独调整。</p>') +
     section('整组基准',label('对齐方式',`<select id="process-mode"><option value="anchor" ${process.mode === 'anchor' || !process.mode ? 'selected' : ''}>轮廓裁切 + 锚点对齐</option><option value="contain" ${process.mode === 'contain' ? 'selected' : ''}>完整切片等比容纳</option><option value="copy" ${process.mode === 'copy' ? 'selected' : ''}>原样复制（相同画布）</option></select>`) +
       `<div class="field-row">${label('缩放倍率',number('process-scale',process.scale ?? 1,'min="0.01" max="10" step="0.01"'))}${label('目标高度',number('process-height',process.fit_height ?? '', 'min="1" placeholder="不启用"'))}</div>` +
+      label('整组水平宽度倍率',number('process-scale-x',process.scale_x ?? 1,`min="0.01" max="10" step="0.01" ${groupCopy ? 'disabled' : ''}`)) +
       `<div class="field-row">${label('水平偏移',number('process-x',process.offset?.[0] || 0,'step="1"'))}${label('垂直偏移',number('process-y',process.offset?.[1] || 0,'step="1"'))}</div>` +
       info('实际组缩放',state.preview?.scale?.toFixed(4) || '预览后显示') +
       `<details><summary>边界与高级设置</summary><label class="field-inline">最大自适应倍率${number('process-max-scale',process.max_scale ?? 1,'min="0.01" max="10" step="0.05"')}</label><label class="field-inline">垂直限制在画布内<input id="process-clamp" type="checkbox" ${process.clamp_y ? 'checked' : ''}></label><label class="field-inline">边缘留白${number('process-padding',process.padding ?? 0,'min="0"')}</label><label class="field-inline">越界处理<select id="process-overflow"><option value="error" ${process.overflow !== 'clip' ? 'selected' : ''}>提示错误</option><option value="clip" ${process.overflow === 'clip' ? 'selected' : ''}>允许裁切</option></select></label><p class="hint">目标高度按整组最高轮廓计算，不逐帧拉成同高。</p></details>`) +
@@ -747,7 +772,15 @@ function bindSourceInspector() {
     frame.box = next; setManualRegions(regions);
   },opts));
   $('#remove-box')?.addEventListener('click',removeRegion);
-  [['process-mode','mode'],['process-scale','scale'],['process-height','fit_height'],['process-max-scale','max_scale'],['process-clamp','clamp_y'],['process-padding','padding'],['process-overflow','overflow']].forEach(([id,key]) => bindValue(id,value => setProcess(key,value),opts));
+  bindValue('process-mode',value=>{
+    if (value === 'copy') {
+      const process=resolvedSource().process;
+      const nonuniform=(process.scale_x ?? 1) !== 1 || Object.values(process.overrides || {}).some(override=>(!override.mode || override.mode === 'copy') && (override.scale_x ?? process.scale_x ?? 1) !== 1);
+      if (nonuniform) throw new Error('copy 模式保留原像素，请先将整组及相关单帧的水平宽度倍率重置为 1。');
+    }
+    setProcess('mode',value);
+  },opts);
+  [['process-scale','scale'],['process-scale-x','scale_x'],['process-height','fit_height'],['process-max-scale','max_scale'],['process-clamp','clamp_y'],['process-padding','padding'],['process-overflow','overflow']].forEach(([id,key]) => bindValue(id,value => setProcess(key,value),opts));
   ['x','y'].forEach((axis,index) => bindValue('process-' + axis,value => { const offset = [...(resolvedSource().process.offset || [0,0])]; offset[index] = value; setProcess('offset',offset); },opts));
   const setOverride = (key,value) => {
     const id = selectedSlice()?.id; if (!id) return;
@@ -759,6 +792,7 @@ function bindSourceInspector() {
     const offset = [...(process.overrides?.[id]?.offset || process.offset || [0,0])]; offset[index] = value; setOverride('offset',offset);
   },opts));
   bindValue('override-scale',value => setOverride('scale',value),opts);
+  bindValue('override-scale-x',value => setOverride('scale_x',value),opts);
   $('#clear-override')?.addEventListener('click', () => change(() => {
     const overrides = clone(resolvedSource().process.overrides || {}); delete overrides[selectedSlice().id]; setProcess('overrides',overrides);
   },opts));
