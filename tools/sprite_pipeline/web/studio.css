@@ -228,7 +228,10 @@ dialog::backdrop { background: #22332c66; }
 .resource-insert small { color:var(--muted); font-size:10px; }
 .resource-type { color:var(--accent); font-size:10px; }
 .resource-card[data-kind="sequence"] .resource-type { color:#866131; }
-.resource-open { border-top:1px solid var(--border); border-radius:0; min-height:26px; font-size:10px; }
+.resource-actions { display:flex; flex-wrap:wrap; border-top:1px solid var(--border); }
+.resource-actions button { flex:1 1 auto; min-height:32px; border-radius:0; font-size:11px; padding:4px 6px; }
+.resource-delete { color:var(--danger); }
+.resource-delete:hover { background:#fbeeed; }
 .resource-navigation { display:flex; align-items:center; gap:10px; padding:6px 16px; background:#f5f8f4; border-bottom:1px solid var(--border); flex-wrap:wrap; }
 .resource-navigation span { color:var(--muted); font-size:11px; }
 .composition-timeline { align-items:stretch; }
@@ -279,6 +282,8 @@ dialog::backdrop { background: #22332c66; }
 .directory-row img { width:28px; height:28px; object-fit:contain; flex-shrink:0; }
 .directory-file { color:var(--muted); }
 .directory-row .directory-insert { min-height:25px; padding:0 6px; border:0; background:transparent; color:var(--accent); }
+.directory-row .directory-delete { flex-shrink:0; min-height:32px; padding:4px 6px; border:0; background:transparent; color:var(--danger); font-size:11px; }
+.directory-row .directory-delete:hover { background:#fbeeed; }
 .directory-empty { margin:4px 12px; font-size:11px; color:var(--muted); }
 #materials-pane .library-kind { display:none; }
 #materials-pane .library-heading { padding:4px 15px; }

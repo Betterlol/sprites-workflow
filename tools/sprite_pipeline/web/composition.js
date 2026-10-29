@@ -60,7 +60,7 @@ export function createCompositionUI(api) {
     $('#asset-library').innerHTML=items.map(item=>{
       const key=resourceKey(item.resource), active=state.assetSelection.has(key), blocked=isEditing() && !state.libraryMulti && !canReference(item.resource);
       const note=item.error || (blocked ? '此引用会形成循环' : item.kind === 'sprite' ? item.ref : `${item.count} 帧 · ${(item.duration/1000).toFixed(2)}s`);
-      return `<div class="resource-card ${active ? 'selected' : ''}" data-kind="${item.kind}"><button class="resource-insert" data-resource="${escape(key)}" draggable="true" aria-pressed="${active}" title="${escape(note)}" ${blocked ? 'disabled' : ''}>${item.url ? `<img src="${escape(item.url)}" alt="" loading="lazy">` : '<span class="resource-placeholder">▧</span>'}<span class="resource-type">${resourceLabel(item.kind)}</span><strong>${escape(item.name)}</strong><small>${escape(item.kind === 'sprite' ? '单帧图片' : note)}</small></button><button class="resource-open text-button" data-open-resource="${escape(key)}">${item.kind === 'sprite' ? '定位原图' : '打开编辑'}</button></div>`;
+      return `<div class="resource-card ${active ? 'selected' : ''}" data-kind="${item.kind}"><button class="resource-insert" data-resource="${escape(key)}" draggable="true" aria-pressed="${active}" title="${escape(note)}" ${blocked ? 'disabled' : ''}>${item.url ? `<img src="${escape(item.url)}" alt="" loading="lazy">` : '<span class="resource-placeholder">▧</span>'}<span class="resource-type">${resourceLabel(item.kind)}</span><strong>${escape(item.name)}</strong><small>${escape(item.kind === 'sprite' ? '单帧图片' : note)}</small></button><div class="resource-actions"><button class="resource-open text-button" data-open-resource="${escape(key)}">${item.kind === 'sprite' ? '定位原图' : '打开编辑'}</button><button class="resource-delete text-button danger" data-delete-resource="${escape(key)}" aria-label="删除 ${escape(item.name)}">删除</button></div></div>`;
     }).join('') || '<p class="hint">没有符合条件的资源</p>';
     $('#asset-library').querySelectorAll('[data-resource]').forEach(card=>{
       card.onclick=(event={})=>{
@@ -71,6 +71,9 @@ export function createCompositionUI(api) {
       card.ondragstart=event=>event.dataTransfer.setData('application/x-resource',JSON.stringify(parseKey(card.dataset.resource)));
     });
     $('#asset-library').querySelectorAll('[data-open-resource]').forEach(button=>button.onclick=()=>open(parseKey(button.dataset.openResource)));
+    $('#asset-library').querySelectorAll('[data-delete-resource]').forEach(button=>button.onclick=event=>{
+      event.preventDefault(); event.stopPropagation(); const target=parseKey(button.dataset.deleteResource); api.deleteResource(target.kind,target.ref);
+    });
     api.updateSaveStatus(); renderNavigation();
   }
   function toggleSelection(key,event={}) {
@@ -110,6 +113,10 @@ export function createCompositionUI(api) {
     api.renderAll(); renderNavigation(); api.showPane('canvas',true);
   }
   function renderNavigation() {
+    for (let index=trail.length-1; index>=0; index--) {
+      const previous=trail[index], ref=previous.mode === 'action' ? previous.action : previous.review;
+      if (!ownResource(state.data,previous.mode === 'action' ? 'action' : 'sequence',ref)) trail.splice(index,1);
+    }
     $('#resource-navigation').hidden=!trail.length;
     $('#resource-navigation-label').textContent=trail.length ? '正在编辑被引用的原资源；保存后所有引用同步更新' : '';
     $('#resource-back').onclick=()=>{ const previous=trail.pop(); if (!previous) return; Object.assign(state,previous); player.pause(); api.renderAll(); renderNavigation(); };
@@ -237,13 +244,7 @@ export function createCompositionUI(api) {
     const chosen=selection(); if (!chosen.length) return;
     if (chosen.every(item=>item.kind === 'sprite')) return api.deleteMaterials('processed',chosen.map(item=>item.ref));
     if (chosen.some(item=>item.kind === 'sprite')) { api.toast('请按资源类型筛选，分别删除图片或组合',true); return; }
-    const keys=new Set(chosen.map(item=>resourceKey(item.resource)));
-    for (const item of chosen) {
-      const used=resourceUsers(state.data,item.resource).filter(resource=>!keys.has(resourceKey(resource)));
-      if (used.length) { api.toast(`${item.name} 仍被 ${used.map(title).join('、')} 引用`,true); return; }
-    }
-    if (!confirm(`删除 ${chosen.length} 个组合资源？素材图片会保留，可撤销；保存工程后生效。`)) return;
-    api.change(()=>{ chosen.forEach(item=>{ const collection=item.kind === 'action' ? state.data.actions : state.data.workbench.reviews; delete collection[item.ref]; }); state.assetSelection.clear(); });
+    return api.deleteCompositions(chosen.map(item=>item.resource));
   }
   return {isEditing,owner,current,slots,selection,visible,renderLibrary,renderTimeline,inspector,bindInspector,insert,open,remove,duplicate,move,deleteSelected,renderNavigation,selectIndex,toggleSelection};
 }

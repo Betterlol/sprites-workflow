@@ -1,5 +1,6 @@
 import {createExportDisplay} from './export-display.js';
 import {createExplorer} from './explorer.js';
+import {deletionImpact,detachForDeletion} from './resource-deletion.js';
 import {clone, actionSteps, reviewSteps, defaultReviews, merge, roundMs} from './model.js';
 import {createCompositionUI} from './composition.js';
 import {allResources,resourceKey,resourceUsers,slotsOf,renameResource,reconcileCompositeAnimations,validateComposition} from './resources.js';
@@ -32,8 +33,8 @@ state.adjustAction = '';
 state.adjustPlaybackMode = 'runtime';
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
-const composition = createCompositionUI({state,$,escape,player,asset,change,renderAll,renderInspector,showPane,mode,steps:activeSteps,onStep,sourceForFrame,deleteMaterials,deleteSequence,renameResource,toast,updateSaveStatus,confirm:message=>confirm(message)});
-const explorer = createExplorer({state,$,escape,composition,mode});
+const composition = createCompositionUI({state,$,escape,player,asset,change,renderAll,renderInspector,showPane,mode,steps:activeSteps,onStep,sourceForFrame,deleteMaterials,deleteSequence,deleteCompositions,deleteResource,renameResource,toast,updateSaveStatus,confirm:message=>confirm(message)});
+const explorer = createExplorer({state,$,escape,composition,mode,deleteResource});
 const exportDisplay = createExportDisplay({$,state,change,toast,escape});
 const LAYOUT_KEY = 'sprite-workbench-layout';
 let storedLayout = {};
@@ -180,13 +181,14 @@ function updateSaveStatus() {
 function checkpoint() {
   state.history.push(clone(state.data)); if (state.history.length > 60) state.history.shift(); state.future = [];
 }
-function change(operation, {render = true, preview = false} = {}) {
+function change(operation, {render = true, preview = false, reconcile = true} = {}) {
   const before=clone(state.data), selection={action:state.action,review:state.review,selected:state.selected,slot:state.slot,clip:state.clip};
   try {
     operation();
     const graph = data => JSON.stringify([data.actions,data.workbench?.reviews,Object.fromEntries(Object.entries(data.defaults || {}).filter(([key])=>!['process','extract'].includes(key)))]);
     if (graph(before) !== graph(state.data)) {
-      reconcileCompositeAnimations(before,state.data); validateComposition(state.data);
+      if (reconcile) reconcileCompositeAnimations(before,state.data);
+      validateComposition(state.data);
     }
   } catch (error) {
     state.data=before; Object.assign(state,selection); toast(error.message,true); renderAll(); return;
@@ -1028,25 +1030,53 @@ $('#asset-multiselect').onchange = () => { state.libraryMulti = $('#asset-multis
 $('#assets-select-visible').onclick = () => { state.libraryMulti = true; visibleAssets().forEach(a => state.assetSelection.add(resourceKey(a.resource))); renderLibrary(); };
 $('#assets-clear').onclick = () => { state.assetSelection.clear(); state.lastAsset = null; renderLibrary(); };
 $('#assets-add').onclick = () => composition.insert(composition.selection().map(item=>item.resource));
-function deleteSequence(kind) {
-  if (state.busy || !state.data || !['action','review'].includes(kind)) return;
-  const ref=state[kind], collection=kind === 'action' ? state.data.actions : reviews();
-  if (!ref || !collection[ref]) return;
-  const target={kind:kind === 'action' ? 'action' : 'sequence',ref};
-  const users=resourceUsers(state.data,target);
-  if (users.length) { toast(`此资源仍被 ${users.map(item=>ownCompositionSpec(item)?.name || item.ref).join('、')} 引用，请先移除相应槽位`,true); return; }
-  if (!confirm(`删除 ${collection[ref].name || ref}？素材图片会保留，可撤销；保存工程后生效。`)) return;
-  player.pause();
-  change(()=>{ delete collection[ref]; state[kind]=Object.keys(collection)[0]; state.slot=0; state.clip=0; state.selected=0; });
+function confirmResourceDeletion(label,targets,prefixes,details) {
+  const affected=deletionImpact(state.data,targets,prefixes);
+  if (!affected.length) return confirm(`删除 ${label}？\n\n${details}`);
+  const names=affected.map(item=>`${item.kind === 'action' ? '动作' : '序列'}：${ownCompositionSpec(item)?.name || item.ref}`);
+  const listing=names.slice(0,20).join('\n')+(names.length > 20 ? `\n另有 ${names.length-20} 个组合受影响（共 ${names.length} 个）` : '');
+  return confirm(`${label} 仍被使用，以下组合会受影响：\n${listing}\n\n是否强制删除？相关引用会被移除，受影响的片段范围与展示顺序会按剩余帧调整；没有剩余帧或无法兼容不同播放方式的片段引用也会移除。空组合会保留，供后续编辑。\n\n${details}`);
+}
+function deleteCompositions(targets) {
+  if (state.busy || !state.data || !targets.length) return;
+  if (targets.some(target=>!ownCompositionSpec(target))) return;
+  try {
+    const label=targets.map(target=>ownCompositionSpec(target).name || target.ref).join('、');
+    if (!confirmResourceDeletion(label,targets,[], '素材图片会保留。可撤销，保存工程后生效。')) return;
+    const data=detachForDeletion(state.data,targets);
+    player.pause();
+    change(()=>{
+      state.data=data;
+      targets.forEach(target=>state.assetSelection.delete(resourceKey(target)));
+      state.slot=0; state.clip=0; state.selected=0;
+    },{reconcile:false}); // The deletion plan has already repaired ranges and display timing.
+    if (targets.every(target=>!ownCompositionSpec(target))) toast(`已删除 ${targets.length} 个组合，保存工程后生效，可撤销`);
+  } catch (error) { toast(error.message,true); }
+}
+function deleteSequence(kind,ref=state[kind]) {
+  if (!['action','review'].includes(kind) || !ref) return;
+  return deleteCompositions([{kind:kind === 'action' ? 'action' : 'sequence',ref}]);
+}
+function deleteResource(kind,ref) {
+  if (!ref || state.busy) return;
+  if (['action','sequence','review'].includes(kind)) return deleteSequence(kind === 'action' ? 'action' : 'review',ref);
+  const materialKind={source:'source',reference:'reference',sprite:'processed'}[kind];
+  if (materialKind) return deleteMaterials(materialKind,[ref]);
 }
 async function deleteMaterials(kind, references) {
   if (state.busy || !references.length) return;
-  const message = kind === 'source' ? `删除原图 ${references.join('、')}？将同时删除对应切片和 processed，并保存当前工程。`
-    : kind === 'reference' ? `删除 ${references.length} 张参考图并保存当前工程？`
-    : `删除选中的 ${references.length} 张素材并保存当前工程？仍被动作使用的素材会阻止删除。自动生成帧在重新应用原图后可能恢复。`;
-  if (!confirm(message)) return;
+  const targets=kind === 'processed' ? references.map(ref=>({kind:'sprite',ref})) : [];
+  const prefixes=kind === 'source' ? references.map(ref=>ref.replace(/\.[^/.]+$/,'')+'/') : [];
+  const label=kind === 'reference' ? `参考图 ${references.join('、')}` : kind === 'source' ? `原图 ${references.join('、')}` : `${references.length} 张单帧素材：${references.join('、')}`;
+  const details=(kind === 'source' ? '会同时删除对应切片、处理帧与原图规则。' : kind === 'processed' ? '自动生成帧在重新应用原图后可能恢复。' : '')+
+    '本次操作会保存整个工程草稿；无法通过网页撤销恢复文件，可在版本记录中恢复。';
+  let data;
+  try {
+    if (!confirmResourceDeletion(label,targets,prefixes,details)) return;
+    data=detachForDeletion(state.data,targets,prefixes);
+  } catch (error) { toast(error.message,true); return; }
   await task('正在删除素材…',async () => {
-    const snapshot = await api('delete',payload({kind,references})); player.pause(); setSnapshot(snapshot);
+    const snapshot = await api('delete',payload({kind,references,data})); player.pause(); setSnapshot(snapshot);
     toast(`已删除 ${snapshot.deleted} 项，工程已保存`);
   });
 }

@@ -33,4 +33,4 @@ Git 默认保留配置、source、processed、references 和工程说明；sourc
 
 ## 引用与删除
 
-processed 引用相对于 processed_sprites，source 引用相对于 source；参考图引用含 references 或旧 reference 前缀。动作与序列共用引用保护：仍被引用的图片、动作或序列不能直接删除。自动生成的单帧即使删除，后续应用原图仍可能重建，删除不等于修改切割规则。
+processed 引用相对于 processed_sprites，source 引用相对于 source；参考图引用含 references 或旧 reference 前缀。动作与序列共用引用保护：仍被引用的图片、动作或序列不能直接删除。网页确认强制删除后，先在配置副本中清理引用、调整受影响组合，再提交删除；CLI 和普通删除 API 仍拒绝删除配置中尚在使用的素材。具体操作见 [网页指南](../users/workbench.md#删除恢复与旧素材)。自动生成的单帧即使删除，后续应用原图仍可能重建，删除不等于修改切割规则。

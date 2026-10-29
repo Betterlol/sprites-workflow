@@ -13,7 +13,7 @@ export function createExplorer(api) {
     $('#project-tree').innerHTML=groups.map(group=>`<details data-folder="${group.key}" ${closed.has(group.key) ? '' : 'open'}><summary>${folderIcon}<span>${group.name}</span><small>${group.items.length}</small><button data-create="${group.key}" title="添加${group.name}" aria-label="添加${group.name}">＋</button></summary><div class="directory-children">${group.items.map(item=>{
       const selected=state.mode === group.key && state[group.key] === item.id;
       const resource=['action','review'].includes(group.key);
-      return `<div class="directory-row ${selected ? 'selected' : ''}"><button data-entry="${escape(item.id)}" data-kind="${group.key}" ${resource ? 'draggable="true"' : ''} title="${escape(item.name)}">${item.url ? `<img src="${escape(item.url)}" alt="">` : '<span class="directory-file">▧</span>'}<span>${escape(item.name)}</span></button>${resource ? `<button class="directory-insert" data-insert="${escape(item.id)}" data-kind="${group.key}" title="加入当前组合" aria-label="将 ${escape(item.name)} 加入当前组合">＋</button>` : ''}</div>`;
+      return `<div class="directory-row ${selected ? 'selected' : ''}"><button data-entry="${escape(item.id)}" data-kind="${group.key}" ${resource ? 'draggable="true"' : ''} title="${escape(item.name)}">${item.url ? `<img src="${escape(item.url)}" alt="">` : '<span class="directory-file">▧</span>'}<span>${escape(item.name)}</span></button>${resource ? `<button class="directory-insert" data-insert="${escape(item.id)}" data-kind="${group.key}" title="加入当前组合" aria-label="将 ${escape(item.name)} 加入当前组合">＋</button>` : ''}<button class="directory-delete text-button danger" data-delete-entry="${escape(item.id)}" data-kind="${group.key}" title="删除 ${escape(item.name)}" aria-label="删除 ${escape(item.name)}">删除</button></div>`;
     }).join('') || '<p class="directory-empty">暂无内容</p>'}</div></details>`).join('');
     $('#directory-project-name').textContent=state.data.project?.name || state.data.character;
     $('#project-tree').querySelectorAll('[data-folder]').forEach(details=>details.ontoggle=()=>{ if (details.open) closed.delete(details.dataset.folder); else closed.add(details.dataset.folder); });
@@ -27,6 +27,9 @@ export function createExplorer(api) {
         else { state[kind]=ref; api.mode(kind,kind === 'source' ? (state.mode === 'source' ? state.sourceView : 'original') : undefined); }
       };
       if (['action','review'].includes(kind)) button.ondragstart=event=>event.dataTransfer.setData('application/x-resource',JSON.stringify({kind:kind === 'action' ? 'action' : 'sequence',ref}));
+    });
+    $('#project-tree').querySelectorAll('[data-delete-entry]').forEach(button=>button.onclick=event=>{
+      event.preventDefault(); event.stopPropagation(); api.deleteResource(button.dataset.kind,button.dataset.deleteEntry);
     });
     $('#project-tree').querySelectorAll('[data-insert]').forEach(button=>button.onclick=()=>composition.insert([{kind:button.dataset.kind === 'action' ? 'action' : 'sequence',ref:button.dataset.insert}]));
   }
