@@ -22,3 +22,11 @@ User authorized implementation of the first two proposed steps, with multiple co
 ## Validation boundary
 
 No actual test execution per user request. Report this explicitly at delivery. Keep existing project assets, untracked workspaces and shared pipeline.json files untouched.
+
+## Delivery record
+
+- 308e69e: shared resource graph, legacy adapters, backend composition/validation/deletion/export integration and browser resolver.
+- a1f41a3: unified library, slot timeline, recursive editing navigation and shared inspector.
+- Final pass: dependency-ordered display remapping, mode-aware validation, correct frame navigation fallback, QA adaptation, types, documentation and unrun regression cases.
+- Static checks: Ruff check/format, JavaScript syntax and package dependency direction. No Python/Node/browser tests were executed.
+- Independent source review found mode validation, QA legacy field access, dependency order and frame navigation gaps; fixes were reviewed read-only with no remaining findings in the final two corrections. Runtime/user acceptance remains pending.

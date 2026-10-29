@@ -1,4 +1,4 @@
-import {clone, actionSteps, reviewSteps, defaultReviews, reconcileReviewRanges, merge, roundMs} from './model.js';
+import {clone, actionSteps, reviewSteps, defaultReviews, merge, roundMs} from './model.js';
 import {createCompositionUI} from './composition.js';
 import {allResources,resourceKey,resourceUsers,slotsOf,renameResource,reconcileCompositeAnimations,validateComposition} from './resources.js';
 import {mergeDraft, resolveMerge, conflictKey} from './merge.js';
@@ -179,7 +179,11 @@ function checkpoint() {
 function change(operation, {render = true, preview = false} = {}) {
   const before=clone(state.data), selection={action:state.action,review:state.review,selected:state.selected,slot:state.slot,clip:state.clip};
   try {
-    operation(); reconcileReviewRanges(state.data); reconcileCompositeAnimations(before,state.data); validateComposition(state.data);
+    operation();
+    const graph = data => JSON.stringify([data.actions,data.workbench?.reviews,Object.fromEntries(Object.entries(data.defaults || {}).filter(([key])=>!['process','extract'].includes(key)))]);
+    if (graph(before) !== graph(state.data)) {
+      reconcileCompositeAnimations(before,state.data); validateComposition(state.data);
+    }
   } catch (error) {
     state.data=before; Object.assign(state,selection); toast(error.message,true); renderAll(); return;
   }
@@ -502,6 +506,7 @@ function renderLibraryFilters() {
 }
 function visibleAssets() { return composition.visible(); }
 function renderLibrary() { composition.renderLibrary(); }
+function selectAsset(ref,event={}) { composition.toggleSelection(`sprite:${ref}`,event); }
 function addAsset(ref,at) { composition.insert([{kind:'sprite',ref}],at); }
 function addAssets(refs,at) { composition.insert(refs.map(ref=>({kind:'sprite',ref})),at); }
 
@@ -1051,7 +1056,7 @@ function deleteSequence(kind) {
   if (!ref || !collection[ref]) return;
   const target={kind:kind === 'action' ? 'action' : 'sequence',ref};
   const users=resourceUsers(state.data,target);
-  if (users.length) { toast(`此资源仍被 ${users.map(item=>item.ref).join('、')} 引用，请先移除相应槽位`,true); return; }
+  if (users.length) { toast(`此资源仍被 ${users.map(item=>ownCompositionSpec(item)?.name || item.ref).join('、')} 引用，请先移除相应槽位`,true); return; }
   if (!confirm(`删除 ${collection[ref].name || ref}？素材图片会保留，可撤销；保存工程后生效。`)) return;
   player.pause();
   change(()=>{ delete collection[ref]; state[kind]=Object.keys(collection)[0]; state.slot=0; state.clip=0; state.selected=0; });

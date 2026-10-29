@@ -1,7 +1,7 @@
 """Small values and structural contracts shared across entry points."""
 
 from dataclasses import dataclass
-from typing import Callable, Protocol, TypedDict, TypeVar
+from typing import Callable, Literal, Protocol, TypedDict, TypeVar
 
 Value = TypeVar("Value")
 Progress = Callable[[int, int, str], None]
@@ -38,6 +38,33 @@ class ReviewStep(ActionStep):
     clip: int
     repetition: int
     boundary: bool
+
+
+class ResourceRef(TypedDict):
+    kind: Literal["sprite", "action", "sequence"]
+    ref: str
+
+
+class SlotIdentity(TypedDict):
+    id: str
+    resource: ResourceRef
+
+
+class ResourceSlot(SlotIdentity, total=False):
+    repeat: int
+    speed: float
+    start: int
+    end: int | None
+    duration_ms: int
+    mode: Literal["runtime", "display"]
+
+
+class ResourceOccurrence(TypedDict):
+    kind: str
+    ref: str
+    slot: int
+    slot_id: str
+    repetition: int
 
 
 @dataclass(frozen=True)

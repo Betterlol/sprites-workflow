@@ -1,4 +1,6 @@
 // The browser projection of domain/resources.py. No persistence or image IO.
+/** @typedef {{kind:'sprite'|'action'|'sequence',ref:string}} ResourceRef */
+/** @typedef {{id:string,resource:ResourceRef,repeat?:number,speed?:number,start?:number,end?:number|null,duration_ms?:number,mode?:'runtime'|'display'}} ResourceSlot */
 import {clone, merge, roundMs} from './model-values.js';
 
 export const resourceKey = resource => `${resource.kind}:${resource.ref}`;
@@ -134,7 +136,7 @@ export function resourceUsers(data, target) {
 }
 export function validateComposition(data) {
   allResources(data).forEach(({kind,ref})=>{
-    resolveResource(data,kind,ref);
+    resolveResource(data,kind,ref,kind === 'sequence' ? resourceSpec(data,kind,ref).mode || 'runtime' : 'runtime');
     if (kind === 'action') resolveResource(data,kind,ref,'display');
   });
 }
@@ -146,19 +148,43 @@ export function renameResource(data, kind, previous, next) {
   });
 }
 export function reconcileCompositeAnimations(before, data) {
-  for (const [name,spec] of Object.entries(data.actions || {})) {
+  // Descendants must be reconciled first: a parent may reference a child's
+  // display projection while its old flattened indices are temporarily stale.
+  const ordered=[], seen=new Set(), active=new Set();
+  const visit = target => {
+    if (target.kind === 'sprite') return;
+    const key=resourceKey(target);
+    if (active.has(key)) throw new Error('循环引用：'+key);
+    if (seen.has(key)) return;
+    if (active.size >= 32) throw new Error('资源嵌套超过 32 层');
+    active.add(key);
+    slotsOf(resourceSpec(data,target.kind,target.ref),target.kind).forEach(slot=>visit(slot.resource));
+    active.delete(key); seen.add(key); ordered.push(target);
+  };
+  allResources(data).forEach(visit);
+  for (const target of ordered) {
+    const name=target.ref, spec=ownResource(data,target.kind,name);
+    if (target.kind === 'sequence') {
+      for (const clip of spec.clips || []) {
+        const count=resolveResource(data,'action',clip.action,spec.mode || 'runtime').length;
+        clip.start=Math.min(clip.start || 0,Math.max(0,count-1));
+        if (clip.end != null) clip.end=Math.max(clip.start,Math.min(clip.end,Math.max(0,count-1)));
+        if (!count) clip.end=null;
+      }
+      continue;
+    }
     if (!spec.slots || !spec.animation?.order || !before.actions?.[name]) continue;
     const old = resolveResource(before,'action',name), next = resolveResource(data,'action',name);
     const positions = new Map(next.map((step,index)=>[JSON.stringify(step.origin),index]));
     const previous = before.actions[name].animation;
     if (!previous?.order || JSON.stringify(spec.animation) !== JSON.stringify(previous)) continue;
-    const used = new Set(), order=[], durations=[];
+    const oldOrigins = new Set(old.map(step=>JSON.stringify(step.origin))), order=[], durations=[];
     previous.order.forEach((index,position)=>{
       const mapped = old[index] && positions.get(JSON.stringify(old[index].origin));
-      if (mapped !== undefined) { order.push(mapped); used.add(mapped); durations.push(previous.durations_ms?.[position] ?? previous.duration_ms ?? old[index].duration_ms); }
+      if (mapped !== undefined) { order.push(mapped); durations.push(previous.durations_ms?.[position] ?? old[index].duration_ms); }
     });
-    next.forEach((step,index)=>{ if (!used.has(index)) { order.push(index); durations.push(step.duration_ms); } });
-    if (order.length) { spec.animation.order=order; spec.animation.durations_ms=durations; }
+    next.forEach((step,index)=>{ if (!oldOrigins.has(JSON.stringify(step.origin))) { order.push(index); durations.push(step.duration_ms); } });
+    if (order.length) { spec.animation.order=order; if (previous.durations_ms) spec.animation.durations_ms=durations; }
     else { delete spec.animation.order; delete spec.animation.durations_ms; }
   }
 }

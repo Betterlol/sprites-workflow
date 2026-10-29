@@ -1,7 +1,7 @@
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-include = ["tools/sprite_pipeline/**/*.py", "tools/check_sprite_architecture.py", "tools/texturepacker.py", "tests/test_architecture.py", "tests/test_render_service.py", "tests/test_storage_repository.py"]
+include = ["tools/sprite_pipeline/**/*.py", "tools/check_sprite_architecture.py", "tools/texturepacker.py", "tests/test_architecture.py", "tests/test_render_service.py", "tests/test_storage_repository.py", "tests/test_resource_composition.py"]
 
 [tool.ruff.lint]
 select = ["E9", "F", "I"]

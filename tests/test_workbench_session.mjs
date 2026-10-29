@@ -5,8 +5,9 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
 const html = await readFile(new URL('../tools/sprite_pipeline/web/index.html',import.meta.url),'utf8');
-const modelSource = await readFile(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url),'utf8');
-const model = await import('data:text/javascript;base64,' + Buffer.from(modelSource).toString('base64'));
+const model = await import(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url));
+const resourceModel = await import(new URL('../tools/sprite_pipeline/web/resources.js',import.meta.url));
+const {createCompositionUI} = await import(new URL('../tools/sprite_pipeline/web/composition.js',import.meta.url));
 const mergeSource = await readFile(new URL('../tools/sprite_pipeline/web/merge.js',import.meta.url),'utf8');
 const mergeModel = await import('data:text/javascript;base64,' + Buffer.from(mergeSource).toString('base64'));
 const elements = new Map();
@@ -108,7 +109,7 @@ let pausedProject = null, resumeSnapshot = null;
 let holdDragPreview = false, releaseDragPreview;
 let holdExtractPreview = false, releaseExtractPreview;
 const context = {
-  ...model, ...mergeModel, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
+  ...model, ...mergeModel, ...resourceModel, createCompositionUI, Player, document, structuredClone, URL, URLSearchParams, Blob, AbortController,
   ResizeObserver:class { constructor(callback) { this.callback = callback; } observe(element) { observedResizes.set(element,this.callback); } },
   FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,cGl4ZWxz'; queueMicrotask(() => this.onload()); } },
   location:{pathname:'/',search:''}, history:{replaceState() {}},
@@ -152,7 +153,7 @@ const context = {
       }
       else if (operation === 'delete') {
         const payload = JSON.parse(options.body);
-        if (payload.kind === 'processed' && Object.values(payload.data.actions).some(action => (action.sprites || []).some(ref => payload.references.includes(ref)))) return {ok:false,status:400,json:async () => ({error:'idle still uses these sprites'})};
+        if (payload.kind === 'processed' && payload.references.some(ref => resourceModel.resourceUsers(payload.data,{kind:'sprite',ref}).length)) return {ok:false,status:400,json:async () => ({error:'idle still uses these sprites'})};
         project.data = structuredClone(payload.data);
         if (payload.kind === 'processed') project.assets = project.assets.filter(a => !payload.references.includes(a.ref));
         else if (payload.kind === 'reference') project.references = project.references.filter(a => !payload.references.includes(a.ref));
@@ -315,12 +316,12 @@ assert.match(elements.get('toast').textContent,/bad.png/);
 selectAsset('imports/a.png'); selectAsset('imports/b.png',{shiftKey:true});
 assert.equal(state.assetSelection.size,2);
 elements.get('assets-add').onclick();
-assert.deepEqual([...state.data.actions.idle.sprites],['imports/a.png','imports/b.png']);
+assert.deepEqual(model.actionSteps(state.data,'idle').map(step=>step.ref),['imports/a.png','imports/b.png']);
 assert.equal(state.history.length,1,'Adding a selection is one undo operation');
-await deleteMaterials('processed',[...state.assetSelection]);
+await deleteMaterials('processed',[...state.assetSelection].map(key=>key.slice(key.indexOf(':')+1)));
 assert.equal(state.assets.length,2); assert.match(elements.get('toast').textContent,/idle/);
-state.data.actions.idle.sprites = null;
-await deleteMaterials('processed',[...state.assetSelection]);
+state.data.actions.idle = {fps:12,sprites:null};
+await deleteMaterials('processed',[...state.assetSelection].map(key=>key.slice(key.indexOf(':')+1)));
 assert.equal(state.assets.length,0); assert.equal(state.assetSelection.size,0);
 
 processedInput.files = [imageFile('conflict.png'),imageFile('skipped.png')];

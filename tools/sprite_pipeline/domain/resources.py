@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import PurePosixPath
 
 from sprite_pipeline.domain.animation import playback
+from sprite_pipeline.domain.models import ResourceSlot
 from sprite_pipeline.domain.validation import NAME, integer, merge, positive
 
 KINDS = {"sprite", "action", "sequence"}
@@ -23,7 +24,7 @@ def resource_spec(data: dict, kind: str, reference: str) -> dict:
     return merge(data.get("defaults", {}), value) if kind == "action" else value
 
 
-def resource_slots(spec: dict, kind: str) -> list[dict]:
+def resource_slots(spec: dict, kind: str) -> list[ResourceSlot]:
     """Read legacy resources without changing the authored representation."""
     if "slots" in spec:
         if not isinstance(spec["slots"], list):

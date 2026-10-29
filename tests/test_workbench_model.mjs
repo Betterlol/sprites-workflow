@@ -12,24 +12,53 @@ Object.assign(canvasPlayer,{size:[32,32],index:1,options:{reference:true,onion:t
 canvasPlayer.draw();
 assert.deepEqual(paints,[['idle',0,0,0.22],['previous',0,0,0.28],['current',12,-5,1]],
   'Single-frame movement translates the current sprite while idle and previous-frame alignment references stay fixed');
-const source = await readFile(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url),'utf8');
-const {actionSteps,reviewSteps,editFrames,roundMs,reconcileReviewRanges} = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const {actionSteps,reviewSteps,editFrames,roundMs,reconcileReviewRanges} = await import(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url));
+
+// Unified resource contracts; added with this feature, intentionally not run at delivery.
+const {resolveResource,reconcileCompositeAnimations,validateComposition,ensureSlots} = await import(new URL('../tools/sprite_pipeline/web/resources.js',import.meta.url));
+const composed = {defaults:{fps:12},actions:{
+  base:{fps:20,loop:true,sprites:['red.png','green.png']},
+  combo:{slots:[{id:'begin',resource:{kind:'action',ref:'base'}},{id:'middle',resource:{kind:'sequence',ref:'bridge'},speed:2},{id:'hold',resource:{kind:'sprite',ref:'red.png'},duration_ms:80,repeat:2}]},
+},workbench:{reviews:{bridge:{mode:'runtime',slots:[
+  {id:'pose',resource:{kind:'sprite',ref:'blue.png'},duration_ms:120},
+  {id:'finish',resource:{kind:'action',ref:'base'},start:1,end:1,repeat:2,speed:2},
+]}}}};
+assert.deepEqual(resolveResource(composed,'action','combo').map(s=>s.ref),['red.png','green.png','blue.png','green.png','green.png','red.png','red.png']);
+assert.deepEqual(resolveResource(composed,'action','combo').map(s=>s.duration_ms),[50,50,60,12,12,80,80]);
+const remapped={actions:{part:{fps:20,sprites:['red.png','green.png']},main:{slots:[{id:'kept',resource:{kind:'action',ref:'part'}}],animation:{order:[1]}}}};
+const previous=structuredClone(remapped);
+remapped.actions.part.fps=10;
+reconcileCompositeAnimations(previous,remapped);
+assert.deepEqual(remapped.actions.main.animation.order,[1],'Intentional display omissions survive changes to inherited timing');
+assert.deepEqual(resolveResource(remapped,'action','main','display').map(s=>s.duration_ms),[100],'An order alone does not freeze inherited durations');
+composed.actions.base={slots:[{id:'cycle',resource:{kind:'sequence',ref:'bridge'}}]};
+assert.throws(()=>validateComposition(composed),/循环/);
+const trimmedDisplay={actions:{part:{sprites:['red.png','green.png'],animation:{order:[0]}}},workbench:{reviews:{cut:{mode:'display',slots:[{id:'cut',resource:{kind:'action',ref:'part'},start:1}]}}}};
+assert.throws(()=>validateComposition(trimmedDisplay),/范围/,'Validate a sequence using its authored playback mode before rendering');
+const parentFirst={actions:{
+  parent:{slots:[{id:'child-use',resource:{kind:'action',ref:'child'},mode:'display'}],animation:{order:[1,0]}},
+  child:{sprites:['red.png','green.png'],animation:{order:[1,0]}},
+}};
+const parentBefore=structuredClone(parentFirst);
+ensureSlots(parentFirst,'action','child').splice(0,1);
+reconcileCompositeAnimations(parentBefore,parentFirst);
+assert.deepEqual(resolveResource(parentFirst,'action','parent','display').map(s=>s.ref),['green.png'],'Reconcile children before display-dependent parents, independently of collection insertion order');
 
 const data = {defaults:{fps:16},actions:{
-  walk:{loop:true,sprites:['red','green','blue'],animation:{order:[2,0,2],durations_ms:[40,90,130]}},
-  rest:{fps:10,sprites:['red']},
+  walk:{loop:true,sprites:['red.png','green.png','blue.png'],animation:{order:[2,0,2],durations_ms:[40,90,130]}},
+  rest:{fps:10,sprites:['red.png']},
 }};
 assert.deepEqual([roundMs(62.5),roundMs(83.5)],[62,84]);
 assert.deepEqual(actionSteps(data,'walk').map(s => s.duration_ms),[62,62,62]);
-assert.deepEqual(actionSteps(data,'walk','display').map(s => [s.ref,s.duration_ms]),[['blue',40],['red',90],['blue',130]]);
+assert.deepEqual(actionSteps(data,'walk','display').map(s => [s.ref,s.duration_ms]),[['blue.png',40],['red.png',90],['blue.png',130]]);
 const review = {mode:'runtime',clips:[{action:'walk',repeat:2,start:1,end:2},{action:'rest',repeat:1}]};
-assert.deepEqual(reviewSteps(data,review).map(s => [s.ref,s.duration_ms]),[['green',62],['blue',62],['green',62],['blue',62],['red',100]]);
+assert.deepEqual(reviewSteps(data,review).map(s => [s.ref,s.duration_ms]),[['green.png',62],['blue.png',62],['green.png',62],['blue.png',62],['red.png',100]]);
 assert.deepEqual(reviewSteps(data,review).filter(s => s.boundary).map(s => s.clip),[0,0,1]);
 const action = structuredClone(data.actions.walk);
-editFrames(action,[2,0],['blue','red']);
+editFrames(action,[2,0],['blue.png','red.png']);
 assert.deepEqual(action.animation.order,[0,1,0]);
 assert.deepEqual(action.animation.durations_ms,[40,90,130]);
-editFrames(action,[0,null,1],['blue','new','red']);
+editFrames(action,[0,null,1],['blue.png','new','red.png']);
 assert.deepEqual(action.animation.order,[0,2,0,1]);
 assert.equal(action.animation.durations_ms.at(-1),83); // No action FPS: uses the default 12 FPS.
 editFrames(action,[0,1,2,null],[...action.sprites,'another'],16);

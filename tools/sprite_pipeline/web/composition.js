@@ -58,7 +58,7 @@ export function createCompositionUI(api) {
     $('#asset-selection-count').textContent=`已选 ${chosen.length} 项`;
     $('#assets-add').textContent=state.mode === 'review' ? '加入序列' : '加入动作';
     $('#asset-library').innerHTML=items.map(item=>{
-      const key=resourceKey(item.resource), active=state.assetSelection.has(key), blocked=isEditing() && !canReference(item.resource);
+      const key=resourceKey(item.resource), active=state.assetSelection.has(key), blocked=isEditing() && !state.libraryMulti && !canReference(item.resource);
       const note=item.error || (blocked ? '此引用会形成循环' : item.kind === 'sprite' ? item.ref : `${item.count} 帧 · ${(item.duration/1000).toFixed(2)}s`);
       return `<div class="resource-card ${active ? 'selected' : ''}" data-kind="${item.kind}"><button class="resource-insert" data-resource="${escape(key)}" draggable="true" aria-pressed="${active}" title="${escape(note)}" ${blocked ? 'disabled' : ''}>${item.url ? `<img src="${escape(item.url)}" alt="" loading="lazy">` : '<span class="resource-placeholder">▧</span>'}<span class="resource-type">${resourceLabel(item.kind)}</span><strong>${escape(item.name)}</strong><small>${escape(item.kind === 'sprite' ? '单帧图片' : note)}</small></button><button class="resource-open text-button" data-open-resource="${escape(key)}">${item.kind === 'sprite' ? '定位原图' : '打开编辑'}</button></div>`;
     }).join('') || '<p class="hint">没有符合条件的资源</p>';
@@ -89,12 +89,19 @@ export function createCompositionUI(api) {
     api.showPane('canvas',true);
   }
   function open(target,remember=true) {
-    if (remember && isEditing() && current()) trail.push({mode:state.mode,action:state.action,review:state.review,slot:state.slot,clip:state.clip,selected:state.selected});
+    const parent=owner(), previousIndex=state.selected;
+    const preserveOccurrence=parent?.kind === 'action' && api.steps()[previousIndex]?.ref === target.ref;
+    if (remember && isEditing() && current()) trail.push({mode:state.mode,action:state.action,review:state.review,slot:state.slot,clip:state.clip,selected:state.selected,playbackMode:state.playbackMode});
     if (target.kind === 'sprite') {
       const source=api.sourceForFrame(state.sources,target.ref);
       if (!source) { if (remember && trail.length) trail.pop(); api.toast('此帧是独立导入的图片，可在外部修改后重新导入'); return; }
-      state.source=source.file; api.mode('source','processed');
-      const index=api.steps().findIndex(step=>step.ref === target.ref); if (index>=0) { state.selected=index; player.seek(index); }
+      state.source=source.file;
+      if (parent?.kind === 'action') { state.adjustAction=parent.ref; state.adjustPlaybackMode=state.playbackMode; }
+      api.mode('source','processed');
+      let steps=api.steps(), index=preserveOccurrence && state.adjustAction === parent.ref && steps[previousIndex]?.ref === target.ref
+        ? previousIndex : steps.findIndex(step=>step.ref === target.ref);
+      if (index < 0) { state.adjustAction=''; steps=api.steps(); index=steps.findIndex(step=>step.ref === target.ref); }
+      if (index>=0) { state.selected=index; player.seek(index); }
     } else {
       state.slot=0; state.expandedLeaf=null;
       if (target.kind === 'action') { state.action=target.ref; state.playbackMode='runtime'; api.mode('action'); }
@@ -187,7 +194,11 @@ export function createCompositionUI(api) {
     }
     if (action && state.playbackMode === 'display' && step) html+=section('所选展开帧',`<span class="selected-ref">${escape(step.ref)}</span>`+
       label('展示停留 ms',number('composition-frame-duration',step.duration_ms,'min="1" max="16777215"'))+
-      '<p class="hint">展开槽位后点击具体帧，可调整该次展示的停留时间。</p>');
+      '<p class="hint">展开槽位后点击具体帧，可调整该次展示的停留时间。已有展示顺序会随槽位来源保留。</p>');
+    if (action && state.playbackMode === 'display') html+=section('展示配置',
+      label('展示循环次数',number('composition-display-loop',spec.animation?.loop ?? (merged.loop ? 0 : 1),'min="0" max="65535"'))+
+      '<p class="hint">0 表示无限循环。恢复顺序后，展示播放沿用组合顺序与各片段时长。</p><button id="composition-reset-display" class="wide">展示配置恢复为组合顺序</button>');
+    if (step) html+=section('当前展开帧',`<span class="selected-ref">${escape(step.ref)}</span><p class="hint">${step.duration_ms} ms</p><button id="locate-source" class="wide">定位到单帧调整</button>`);
     html+=section('引用关系',`<p class="hint">${users.length ? '此资源被 '+users.map(item=>escape(title(item))).join('、')+' 引用。修改原资源会同步到这些组合。' : '此资源可以作为素材加入其他动作或序列。'}</p>`+
       `<button id="composition-delete" class="wide danger">删除${resourceLabel(parent.kind)}</button>`);
     return html;
@@ -208,7 +219,8 @@ export function createCompositionUI(api) {
       if (!/^[A-Za-z0-9_-]+$/.test(value) || state.data.actions[value]) throw new Error('动作 ID 必须唯一，使用字母、数字、下划线和短横线');
       api.renameResource(state.data,'action',parent.ref,value); state.data.actions[value]=spec; delete state.data.actions[parent.ref]; state.action=value;
     });
-    bind('composition-fps',value=>{ spec.fps=value; }); bind('composition-columns',value=>{ spec.pack={...spec.pack,columns:value}; });
+    bind('composition-fps',value=>{ if (value === null) delete spec.fps; else spec.fps=value; });
+    bind('composition-columns',value=>{ spec.pack ||= {}; if (value === null) delete spec.pack.columns; else spec.pack.columns=value; });
     bind('composition-loop',value=>{ spec.loop=value; }); bind('composition-mode',value=>{ spec.mode=value; });
     ['runtime','display'].forEach(mode=>{ const button=$('#composition-'+mode); if (button) button.onclick=()=>{ state.playbackMode=mode; state.selected=0; player.pause(); api.renderAll(); }; });
     const mutate=operation=>{ const slot=writable()[selected()]; if (slot) operation(slot); };
@@ -222,6 +234,9 @@ export function createCompositionUI(api) {
       const steps=api.steps(); steps[state.selected].duration_ms=value;
       spec.animation ||= {}; spec.animation.order=steps.map(step=>step.frame); spec.animation.durations_ms=steps.map(step=>step.duration_ms);
     });
+    bind('composition-display-loop',value=>{ spec.animation ||= {}; if (value === null) delete spec.animation.loop; else spec.animation.loop=value; });
+    $('#composition-reset-display')?.addEventListener('click',()=>api.change(()=>{ delete spec.animation; }));
+    $('#locate-source')?.addEventListener('click',()=>{ const step=api.steps()[state.selected]; if (step) open({kind:'sprite',ref:step.ref}); });
     $('#composition-delete').onclick=()=>api.deleteSequence(state.mode);
   }
   function deleteSelected() {
@@ -236,5 +251,5 @@ export function createCompositionUI(api) {
     if (!confirm(`删除 ${chosen.length} 个组合资源？素材图片会保留，可撤销；保存工程后生效。`)) return;
     api.change(()=>{ chosen.forEach(item=>{ const collection=item.kind === 'action' ? state.data.actions : state.data.workbench.reviews; delete collection[item.ref]; }); state.assetSelection.clear(); });
   }
-  return {isEditing,owner,current,slots,selection,visible,renderLibrary,renderTimeline,inspector,bindInspector,insert,open,remove,duplicate,move,deleteSelected,renderNavigation,selectIndex};
+  return {isEditing,owner,current,slots,selection,visible,renderLibrary,renderTimeline,inspector,bindInspector,insert,open,remove,duplicate,move,deleteSelected,renderNavigation,selectIndex,toggleSelection};
 }

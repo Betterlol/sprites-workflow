@@ -11,9 +11,9 @@ from tempfile import TemporaryDirectory
 
 from PIL import Image, ImageDraw
 
+from sprite_pipeline.application.export_formats import action_playback
 from sprite_pipeline.application.sequences import sequence_steps
 from sprite_pipeline.domain.actions import action_steps, review_steps
-from sprite_pipeline.domain.animation import playback
 from sprite_pipeline.imaging.gif import encode_gif
 from sprite_pipeline.storage.configuration import Config, config_from_data, inside, positive
 
@@ -92,7 +92,7 @@ def render_qa(
         steps = action_steps(cfg, action, mode)
         spec = cfg.action(action)
         loop = (
-            playback(spec, len(spec["sprites"]))[2]
+            action_playback(cfg, action, len(action_steps(cfg, action)))[2]
             if mode == "display"
             else (0 if spec.get("loop") else 1)
         )
