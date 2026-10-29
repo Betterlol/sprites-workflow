@@ -1,5 +1,0 @@
-# 文档已迁移
-
-本页保留旧链接入口。请阅读 [artwork-workflow](agents/artwork-workflow.md)。
-
-所有当前文档入口见 [文档目录](README.md)。
