@@ -24,6 +24,7 @@ python tools/serve_sprites.py --config <已有pipeline.json路径>
 ## 使用与协作
 
 - 网页用户：[操作指南](docs/users/workbench.md)，包括切割、单帧调整、组合、保存与导出。
+- 使用 Agent：[如何布置任务](docs/users/using-agent.md)。
 - Agent：[任务入口](docs/agents/README.md) 与 [AGENTS.md](AGENTS.md)。美术任务先读制作与验收流程；代码、文档任务不触发素材制作。
 - 共享工程：[目录与协作](docs/reference/project-layout.md)、[CLI 操作](docs/reference/project-operations.md)、[配置与阶段](docs/reference/pipeline.md)、[资源组合](docs/reference/resources.md)。
 - 开发维护：[开发指南](docs/development/contributing.md)、[代码架构](docs/development/architecture.md)。

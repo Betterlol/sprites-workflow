@@ -5,6 +5,7 @@
 | 读者 | 从这里开始 | 职责 |
 | --- | --- | --- |
 | 网页用户 | [网页工作台](users/workbench.md) | 建工程、切割、调整、组合与导出 |
+| 使用 Agent 的用户 | [如何布置任务](users/using-agent.md) | 指定工程、目标和验收范围 |
 | Agent | [任务入口](agents/README.md)；根目录 [AGENTS.md](../AGENTS.md) | 按任务选读、保护共享成果、记录来源和实际验收 |
 | 用户与 Agent | [工程布局](reference/project-layout.md)、[工程操作与 CLI](reference/project-operations.md) | 使用同一份工程、版本与操作接口 |
 | 用户、Agent 与开发者 | [配置与阶段](reference/pipeline.md)、[资源组合与播放](reference/resources.md) | 字段含义、保存边界、引用和时长规则 |
@@ -18,6 +19,7 @@
 | 启动与项目概览 | 根目录 [README](../README.md) | 保持简短，细节链接到对应分区 |
 | 网页操作与按钮位置 | users/workbench.md | 随界面更新，不混入历史测试报告 |
 | Agent 任务路由和硬性边界 | 根目录 AGENTS.md | 自动发现入口；详细制作步骤链接到 agents |
+| 可选制作方法 | [制作技巧](reference/animation-techniques.md) | 按需使用，不扩充必做清单 |
 | 美术制作、参考与视觉完成门槛 | agents/artwork-workflow.md | 是执行规范，不表示工具自动完成这些检查 |
 | 工程文件与 CLI 接口 | reference/project-layout.md、project-operations.md | 人与 Agent 共用，不重复列美术流程 |
 | 配置和播放语义 | reference/pipeline.md、resources.md | 按当前实现说明，兼容与未实现项明确标出 |
