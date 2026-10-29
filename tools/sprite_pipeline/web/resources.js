@@ -78,7 +78,7 @@ function expand(data, kind, ref, spec, mode, stack, allowEmpty) {
     ids.add(id); targetValid(slot.resource);
     const target = slot.resource, repeat = integer(slot.repeat ?? 1,'重复次数',1), speed = positive(slot.speed ?? 1,'播放速度');
     if (repeat > 100 || speed < .01 || speed > 100) throw new Error('重复次数上限为 100，速度范围为 0.01–100');
-    const childMode = slot.mode ?? (kind === 'sequence' ? spec.mode || 'runtime' : 'runtime');
+    const childMode = slot.mode ?? (kind === 'sequence' ? mode : 'runtime');
     if (!['runtime','display'].includes(childMode)) throw new Error('引用播放方式无效');
     let children;
     if (target.kind === 'sprite') {

@@ -102,9 +102,7 @@ class ResourceResolver:
             speed = positive(slot.get("speed", 1), "slot.speed")
             if not 0.01 <= speed <= 100:
                 raise ValueError("slot.speed must be between 0.01 and 100")
-            child_mode = slot.get(
-                "mode", spec.get("mode", "runtime") if kind == "sequence" else "runtime"
-            )
+            child_mode = slot.get("mode", mode if kind == "sequence" else "runtime")
             if child_mode not in {"runtime", "display"}:
                 raise ValueError("Slot playback mode must be runtime or display")
             if target["kind"] == "sprite":

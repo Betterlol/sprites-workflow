@@ -1,4 +1,6 @@
-import {clone, frames, actionSteps, reviewSteps, editFrames, defaultReviews, reconcileReviewRanges, merge, roundMs} from './model.js';
+import {clone, actionSteps, reviewSteps, defaultReviews, reconcileReviewRanges, merge, roundMs} from './model.js';
+import {createCompositionUI} from './composition.js';
+import {allResources,resourceKey,resourceUsers,slotsOf,renameResource,reconcileCompositeAnimations,validateComposition} from './resources.js';
 import {mergeDraft, resolveMerge, conflictKey} from './merge.js';
 import {clampPanel, clampTimeline, savedSize} from './layout.js';
 import {Player} from './player.js';
@@ -13,7 +15,7 @@ const number = (id, value, attributes = '') => `<input id="${id}" type="number" 
 const info = (key, value) => `<div class="info-row"><span>${key}</span><strong>${escape(value)}</strong></div>`;
 const section = (title, body) => `<section class="inspector-section"><h3>${title}</h3>${body}</section>`;
 const state = {mode:'action', data:null, revision:null, token:null, assets:[], sources:[], references:[], action:null, source:null, review:null, reference:null,
-  selected:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewKey:null, previewError:null,
+  selected:0, slot:0, clip:0, playbackMode:'runtime', sourceView:'processed', preview:null, previewSource:null, previewKey:null, previewError:null,
   history:[], future:[], saved:null, savedData:null, busy:false, previewEpoch:0, projectId:null, assetRevision:null, externalChange:false,
   assetSelection:new Set(), libraryMulti:false, lastAsset:null, previewOffsets:{}};
 let previewTimer, toastTimer, previewRequest;
@@ -28,6 +30,7 @@ state.adjustAction = '';
 state.adjustPlaybackMode = 'runtime';
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
+const composition = createCompositionUI({state,$,escape,player,asset,change,renderAll,renderInspector,showPane,mode,steps:activeSteps,onStep,sourceForFrame,deleteMaterials,deleteSequence,renameResource,toast,updateSaveStatus,confirm:message=>confirm(message)});
 const LAYOUT_KEY = 'sprite-workbench-layout';
 let storedLayout = {};
 try { storedLayout = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {}; } catch {}
@@ -137,6 +140,7 @@ async function task(message, operation) {
 function reviews() { return state.data?.workbench?.reviews || {}; }
 function currentReview() { return reviews()[state.review]; }
 function currentAction() { return state.data.actions[state.action]; }
+function ownCompositionSpec(target) { return target.kind === 'action' ? state.data.actions[target.ref] : reviews()[target.ref]; }
 function sourceInfo() { return state.sources.find(source => source.file === state.source); }
 function referenceInfo() { return state.references.find(image => image.ref === state.reference); }
 function asset(ref) { return state.assets.find(item => item.ref === ref); }
@@ -167,13 +171,19 @@ function updateSaveStatus() {
   $('#migrate').disabled = state.busy || !state.legacyCount;
   $('#delete-item').disabled = state.busy || !state[state.mode];
   $('#assets-delete').disabled = state.busy || !state.assetSelection.size;
-  $('#assets-add').disabled = state.busy || !state.assetSelection.size || state.mode !== 'action' || !state.data || !currentAction() || state.playbackMode !== 'runtime';
+  $('#assets-add').disabled = state.busy || !state.assetSelection.size || !composition.isEditing() || !state.data || !composition.current();
 }
 function checkpoint() {
   state.history.push(clone(state.data)); if (state.history.length > 60) state.history.shift(); state.future = [];
 }
 function change(operation, {render = true, preview = false} = {}) {
-  checkpoint(); operation(); reconcileReviewRanges(state.data); state.previewEpoch++;
+  const before=clone(state.data), selection={action:state.action,review:state.review,selected:state.selected,slot:state.slot,clip:state.clip};
+  try {
+    operation(); reconcileReviewRanges(state.data); reconcileCompositeAnimations(before,state.data); validateComposition(state.data);
+  } catch (error) {
+    state.data=before; Object.assign(state,selection); toast(error.message,true); renderAll(); return;
+  }
+  state.history.push(before); if (state.history.length > 60) state.history.shift(); state.future=[]; state.previewEpoch++;
   if (state.mode === 'source' && state.sourceView === 'processed' && preview) {
     schedulePreview(); if (render) renderInspector(); updateSaveStatus(); return;
   }
@@ -201,7 +211,8 @@ function setSnapshot(snapshot) {
 function reconcileMaterials() {
   state.source = state.sources.some(s => s.file === state.source) ? state.source : state.sources[0]?.file;
   state.reference = state.references.some(image => image.ref === state.reference) ? state.reference : state.references[0]?.ref;
-  state.assetSelection = new Set([...state.assetSelection].filter(ref => state.assets.some(asset => asset.ref === ref)));
+  const availableResources=new Set([...state.assets.map(item=>`sprite:${item.ref}`),...allResources(state.data).map(resourceKey)]);
+  state.assetSelection = new Set([...state.assetSelection].filter(ref=>availableResources.has(ref)));
 }
 async function loadProject() {
   const snapshot = await api('project'); setSnapshot(snapshot);
@@ -239,7 +250,7 @@ async function openProject(projectId) {
     clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
     player.reset(); state.projectId = projectId;
     processedPreviews.clear(); state.adjustAction = ''; state.adjustPlaybackMode = 'runtime';
-    state.action = null; state.source = null; state.review = null; state.reference = null; state.selected = 0; state.clip = 0;
+    state.action = null; state.source = null; state.review = null; state.reference = null; state.selected = 0; state.slot = 0; state.clip = 0;
     state.assetSelection.clear(); state.libraryMulti = false; state.lastAsset = null;
     state.mode = snapshot.sources.length ? 'source' : snapshot.assets.length ? 'action' : 'reference';
     state.sourceView = 'original'; state.playbackMode = 'runtime';
@@ -400,7 +411,7 @@ function mode(value, sourceView = 'processed') {
     state.preview = null; state.previewKey = null; state.previewError = null;
   }
   if (value === 'source') state.sourceView = sourceView;
-  state.mode = value; state.selected = 0; state.clip = 0; player.pause();
+  state.mode = value; state.selected = 0; state.slot = 0; state.clip = 0; player.pause();
   if (value === 'source' && sourceView === 'processed') chooseAdjustmentAction();
   clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
   if (value === 'source') schedulePreview(); renderAll();
@@ -452,7 +463,7 @@ function renderWorkflow() {
   $('#action-navigation').hidden = !['action','review'].includes(state.mode);
   $('#action-edit').classList.toggle('active',state.mode === 'action');
   $('#action-review').classList.toggle('active',state.mode === 'review');
-  const idle = asset(state.data.actions.idle?.sprites?.[0]);
+  const idle = asset(state.data.actions.idle ? actionSteps(state.data,'idle')[0]?.ref : null);
   $('#sidebar-context').innerHTML = state.mode !== 'reference' ? `<h3>当前 IDLE 首帧</h3>${idle ? `<img src="${escape(idle.url)}" alt="当前 IDLE 动作首帧"><p>用于播放时的基准对照</p>` : '<p>还没有可用的 idle 动作。可先完成原帧调整，再编排动作。</p>'}<button id="context-reference" class="text-button">查看角色参考 →</button>` : '<p>导入人设或已确认的参考图，随时对照角色形象。</p>';
   $('#context-reference')?.addEventListener('click',() => mode('reference'));
   if (state.mode === 'reference') {
@@ -465,18 +476,21 @@ function renderWorkflow() {
 function renderItems() {
   const items = state.mode === 'source' ? state.sources.map(source => ({id:source.file,name:source.file,count:source.count,stale:source.stale,url:source.url}))
     : state.mode === 'reference' ? state.references.map(image => ({id:image.ref,name:image.file,count:image.size.join('×'),url:image.url}))
-    : state.mode === 'action' ? Object.entries(state.data.actions).map(([id, action]) => ({id,name:id,count:frames(action).length,url:asset(frames(action)[0])?.url}))
-    : Object.entries(reviews()).map(([id, review]) => ({id,name:review.name || id,count:review.clips.length}));
-  const selected = {source:state.source,action:state.action,review:state.review,reference:state.reference}[state.mode];
-  $('#item-list').innerHTML = items.map(item => `<button class="item-row ${item.id === selected ? 'active' : ''}" data-item="${escape(item.id)}" title="${escape(item.name)}">${item.url ? `<img class="item-thumbnail" src="${escape(item.url)}" alt="" loading="lazy">` : `<span class="item-icon">${state.mode === 'review' ? '⇢' : '▧'}</span>`}<span class="item-name">${escape(item.name)}</span><small class="${item.stale ? 'stale' : ''}">${item.stale ? '待更新' : escape(String(item.count).padStart(2,'0'))}</small></button>`).join('') || '<p class="hint" style="padding:12px">点击 ＋ 开始创建</p>';
-  $('#item-list').querySelectorAll('[data-item]').forEach(button => {
-    button.onclick = () => {
-      state[state.mode] = button.dataset.item; state.selected = 0; state.clip = 0; player.pause();
-      if (state.mode === 'source') { state.preview = null; state.previewKey = null; state.previewError = null; state.previewEpoch++; if (state.sourceView === 'processed') chooseAdjustmentAction(); schedulePreview(); }
-      renderAll(); showPane('canvas',true);
+    : Object.entries(state.mode === 'action' ? state.data.actions : reviews()).map(([id,spec])=>{
+      const steps=state.mode === 'action' ? actionSteps(state.data,id) : reviewSteps(state.data,spec);
+      return {id,name:spec.name || id,count:slotsOf(spec,state.mode === 'action' ? 'action' : 'sequence').length,url:asset(steps[0]?.ref)?.url};
+    });
+  const selected={source:state.source,action:state.action,review:state.review,reference:state.reference}[state.mode];
+  $('#item-list').innerHTML=items.map(item=>`<button class="item-row ${item.id === selected ? 'active' : ''}" data-item="${escape(item.id)}" title="${escape(item.name)}">${item.url ? `<img class="item-thumbnail" src="${escape(item.url)}" alt="" loading="lazy">` : '<span class="item-icon">▧</span>'}<span class="item-name">${escape(item.name)}</span><small>${item.stale ? '待更新' : escape(item.count)}</small></button>`).join('') || '<p class="hint" style="padding:12px">点击 ＋ 开始创建</p>';
+  $('#item-list').querySelectorAll('[data-item]').forEach(button=>{
+    button.onclick=()=>{
+      state[state.mode]=button.dataset.item; state.slot=0; state.selected=0; state.clip=0; player.pause();
+      if (state.mode === 'source') { state.preview=null; state.previewKey=null; state.previewError=null; state.previewEpoch++; if (state.sourceView === 'processed') chooseAdjustmentAction(); schedulePreview(); }
+      renderAll();
     };
-    if (state.mode === 'action') {
-      button.draggable = true; button.ondragstart = event => event.dataTransfer.setData('application/x-action', button.dataset.item);
+    if (['action','review'].includes(state.mode)) {
+      button.draggable=true;
+      button.ondragstart=event=>event.dataTransfer.setData('application/x-resource',JSON.stringify({kind:state.mode === 'action' ? 'action' : 'sequence',ref:button.dataset.item}));
     }
   });
 }
@@ -486,46 +500,11 @@ function renderLibraryFilters() {
   select.innerHTML = '<option value="">全部来源</option>' + groups.map(group => `<option value="${escape(group)}">${escape(group)}</option>`).join('');
   if (groups.includes(value)) select.value = value;
 }
-function visibleAssets() {
-  const search = $('#asset-search').value.toLowerCase(), group = $('#asset-source').value;
-  return state.assets.filter(a => a.ref.toLowerCase().includes(search) && (!group || a.ref.startsWith(group + '/')));
-}
-function renderLibrary() {
-  const items = visibleAssets();
-  $('#asset-count').textContent = state.assets.length;
-  $('#asset-multiselect').checked = state.libraryMulti;
-  $('#asset-selection-actions').hidden = !state.libraryMulti || !state.assetSelection.size;
-  $('#asset-selection-count').textContent = `已选 ${state.assetSelection.size} 张`;
-  $('#asset-library').innerHTML = items.map(a => `<button class="asset-card ${state.assetSelection.has(a.ref) ? 'selected' : ''}" data-ref="${escape(a.ref)}" draggable="true" aria-pressed="${state.assetSelection.has(a.ref)}" title="${escape(a.ref)} · ${state.libraryMulti ? '点击选择；Shift 连选' : '点击加入当前动作；Ctrl/Shift 多选'}"><img src="${escape(a.url)}" alt="${escape(a.ref)}" loading="lazy"><span>${escape(a.ref)}</span><span class="asset-add">${state.assetSelection.has(a.ref) ? '✓' : '＋'}</span></button>`).join('') || '<p class="hint">暂无素材</p>';
-  $('#asset-library').querySelectorAll('[data-ref]').forEach(card => {
-    card.onclick = (event = {}) => {
-      if (state.libraryMulti || event.ctrlKey || event.metaKey || event.shiftKey) selectAsset(card.dataset.ref,event);
-      else addAsset(card.dataset.ref);
-    };
-    card.ondragstart = event => event.dataTransfer.setData('application/x-sprite', card.dataset.ref);
-  });
-  updateSaveStatus();
-}
-function selectAsset(ref, event = {}) {
-  state.libraryMulti = true;
-  const items = visibleAssets(), start = items.findIndex(a => a.ref === state.lastAsset), end = items.findIndex(a => a.ref === ref);
-  if (event.shiftKey && start >= 0 && end >= 0) items.slice(Math.min(start,end),Math.max(start,end) + 1).forEach(a => state.assetSelection.add(a.ref));
-  else if (state.assetSelection.has(ref)) state.assetSelection.delete(ref);
-  else state.assetSelection.add(ref);
-  state.lastAsset = ref; renderLibrary();
-}
-function addAsset(ref, at) { addAssets([ref],at); }
-function addAssets(references, at) {
-  if (!references.length) return;
-  if (state.mode !== 'action') { toast('切换到“动作编排”，即可将素材加入动作'); return; }
-  const action = currentAction(); if (!action) { toast('请先创建一个动作'); return; }
-  if (state.playbackMode === 'display') { toast('请切换到游戏帧，再添加素材；展示播放通过重复帧和排序调整'); return; }
-  change(() => {
-    const refs = [...frames(action)], slots = refs.map((_, i) => i), index = at ?? refs.length;
-    refs.splice(index, 0, ...references); slots.splice(index, 0, ...references.map(() => null)); editFrames(action, slots, refs, state.data.defaults?.fps || 12); state.selected = index;
-  });
-  showPane('canvas',true);
-}
+function visibleAssets() { return composition.visible(); }
+function renderLibrary() { composition.renderLibrary(); }
+function addAsset(ref,at) { composition.insert([{kind:'sprite',ref}],at); }
+function addAssets(refs,at) { composition.insert(refs.map(ref=>({kind:'sprite',ref})),at); }
+
 function activeSteps() {
   if (state.mode === 'reference') return [];
   if (state.mode === 'source') {
@@ -548,7 +527,7 @@ function activeSteps() {
   return currentReview() ? reviewSteps(state.data, currentReview()) : [];
 }
 function chooseAdjustmentAction() {
-  const names=Object.keys(state.data.actions).filter(name=>frames(state.data.actions[name]).some(ref=>sourceForFrame(state.sources,ref)?.file === state.source));
+  const names=Object.keys(state.data.actions).filter(name=>actionSteps(state.data,name).some(step=>sourceForFrame(state.sources,step.ref)?.file === state.source));
   state.adjustAction = names.includes(state.adjustAction) ? state.adjustAction : names.includes(state.action) ? state.action : names[0] || '';
   if (!state.source && state.data.actions[state.action]) state.adjustAction = state.action;
   if (state.adjustAction) $('#loop-preview').checked = !!merge(state.data.defaults,state.data.actions[state.adjustAction]).loop;
@@ -573,6 +552,7 @@ function selectAdjustmentStep(index) {
 }
 function refreshPlayer({seek = true} = {}) {
   player.sourceView = null; player.setProject(state.data, state.assets);
+  player.idle = state.data.actions.idle ? actionSteps(state.data,'idle')[0]?.ref : null;
   const steps = activeSteps();
   if (state.mode === 'reference' && referenceInfo()) {
     const image = referenceInfo(); player.size = image.size;
@@ -587,7 +567,7 @@ function refreshPlayer({seek = true} = {}) {
   } else {
     $('#canvas-label').textContent = `${state.data.frame_size.join(' × ')} · 固定锚点 (${state.data.anchor.pixels.join(', ')})`;
   }
-  if (seek) player.setSteps(steps, state.mode === 'review' ? Math.min(player.index, Math.max(0,steps.length - 1)) : state.selected);
+  if (seek) player.setSteps(steps, state.selected);
   else player.updateSteps(steps);
   $('#stage').classList.toggle('frame-movable',canDragFrame());
   $('#empty-canvas').hidden = steps.length > 0 || !!player.sourceView;
@@ -595,7 +575,7 @@ function refreshPlayer({seek = true} = {}) {
   if (missing.length) { $('#empty-canvas').hidden = false; $('#empty-canvas strong').textContent = '动作引用的素材尚未就绪'; $('#empty-canvas p').textContent = '点击“准备缺失素材”，或从已有最终帧导入'; }
   else { $('#empty-canvas strong').textContent = state.mode === 'reference' ? '添加角色参考图' : state.mode === 'source' ? '导入原图，开始处理素材' : '从素材开始，编排动作'; $('#empty-canvas p').textContent = state.mode === 'reference' ? '点击参考图旁的 ＋，可一次选择多张图片' : state.mode === 'source' ? '点击原图旁的 ＋，选择图片后预览并应用处理' : '点击左侧素材，或将它拖入下方时间轴'; }
   $('#total-time').textContent = (steps.reduce((sum, step) => sum + step.duration_ms, 0) / 1000).toFixed(2) + 's';
-  $('#timeline-stats').textContent = `${steps.length} FRAMES`;
+  $('#timeline-stats').textContent = composition.isEditing() ? `${composition.slots().length} 个槽位 / ${steps.length} 帧` : `${steps.length} FRAMES`;
   $('#play').textContent = player.playing ? 'Ⅱ' : '▶';
   $('#play').disabled = !steps.length || !!player.sourceView || (state.mode === 'source' && state.sourceView === 'processed' && steps.some(step=>!step.url));
   player.loop = $('#loop-preview').checked;
@@ -607,109 +587,30 @@ function onStep(index) {
   $('#frame-info').textContent = state.mode === 'source' && state.sourceView === 'original' ? `区域 ${String(index + 1).padStart(2,'0')} · 原始尺寸` : step ? `${step.action ? step.action + ' / ' : ''}${step.ref || step.id} · ${step.duration_ms} ms` : '—';
   $('#play').textContent = player.playing ? 'Ⅱ' : '▶';
   document.querySelectorAll('.timeline-card').forEach(card => {
-    const active = state.mode === 'review' ? Number(card.dataset.index) === step?.clip : Number(card.dataset.index) === index;
+    const active = composition.isEditing() ? Number(card.dataset.index) === step?.slot : Number(card.dataset.index) === index;
     card.classList.toggle('playing', active);
   });
 }
 function renderTimeline() {
-  const timeline = $('#timeline'), steps = activeSteps(), scrollLeft = $('#timeline').scrollLeft;
-  const cards = state.mode === 'review' ? (currentReview()?.clips || []).map((clip, index) => {
-    const first = actionSteps(state.data,clip.action,currentReview().mode)[clip.start || 0];
-    return {index, ref:first?.ref, caption:`${clip.repeat}× · ${clip.start || 0}–${clip.end ?? 'END'}`,name:clip.action};
-  }) : steps.map((step,index) => ({...step,index,caption:state.mode === 'source' && state.sourceView === 'original' ? `${step.box?.[2]-step.box?.[0]} × ${step.box?.[3]-step.box?.[1]}` : `${step.duration_ms} ms`}));
-  timeline.innerHTML = cards.map(card => `<button class="timeline-card ${state.mode === 'review' ? 'clip' : ''} ${card.index === (state.mode === 'review' ? state.clip : state.selected) ? 'selected' : ''}" data-index="${card.index}" data-ref="${escape(card.ref || '')}" data-duration="${card.duration_ms || 0}" draggable="${state.mode !== 'source'}" title="${escape(card.ref || card.name)}">${state.mode === 'review' ? `<span class="clip-name">${escape(card.name)}</span>` : ''}${card.url || asset(card.ref)?.url ? `<img src="${escape(card.url || asset(card.ref).url)}" alt="${escape(card.ref)}">` : '<span style="height:73px;padding:20px;color:#ef9292">缺失</span>'}<span class="frame-caption"><span>${state.mode === 'source' ? String(card.index + 1).padStart(2,'0') : String(card.index).padStart(3,'0')}</span><span>${escape(card.caption)}</span></span></button>`).join('') || '<div class="timeline-empty">将素材或动作拖到这里，开始编排 →</div>';
-  timeline.scrollLeft = scrollLeft;
-  const tools = state.mode === 'reference' ? '' : state.mode === 'source' ? '<button id="source-preview">刷新预览</button>' : state.mode === 'action' ? '<button id="duplicate-frame">重复帧</button><button id="reverse-frames">倒序</button><button id="remove-frame">移除</button>' : '<button id="add-clip">＋ 动作片段</button><button id="remove-clip">移除</button>';
-  $('#timeline-tools').innerHTML = tools;
-  timeline.querySelectorAll('[data-index]').forEach(card => {
-    card.onclick = () => {
-      const index = Number(card.dataset.index); player.pause();
-      if (state.mode === 'review') {
-        state.clip = index; player.seek(Math.max(0,steps.findIndex(step => step.clip === index)));
-      } else { if (state.mode === 'source' && state.sourceView === 'processed') selectAdjustmentStep(index); else state.selected = index; player.seek(index); }
-      renderInspector(); renderTimeline(); onStep(player.index); if (player.sourceView) { player.sourceView.selected = index; player.draw(); }
-      if (state.mode === 'source' && state.sourceView === 'processed') { renderItems(); renderWorkflow(); }
-    };
-    card.ondragstart = event => event.dataTransfer.setData('application/x-timeline', card.dataset.index);
-    card.ondragover = event => event.preventDefault();
-    card.ondrop = event => {
-      event.preventDefault(); event.stopPropagation(); const target = Number(card.dataset.index);
-      const original = event.dataTransfer.getData('application/x-timeline');
-      const ref = event.dataTransfer.getData('application/x-sprite');
-      const action = event.dataTransfer.getData('application/x-action');
-      if (original !== '') moveTimeline(Number(original), target);
-      else if (ref) addAsset(ref,target);
-      else if (action && state.mode === 'review') addClip(action,target);
-    };
+  if (composition.isEditing()) return composition.renderTimeline();
+  const timeline=$('#timeline'), scroll=timeline.scrollLeft, steps=activeSteps();
+  timeline.classList.remove('composition-timeline');
+  timeline.innerHTML=steps.map((step,index)=>`<button class="timeline-card ${index === state.selected ? 'selected' : ''}" data-index="${index}" data-ref="${escape(step.ref)}" data-duration="${step.duration_ms}">${step.url || asset(step.ref)?.url ? `<img src="${escape(step.url || asset(step.ref).url)}" alt="${escape(step.ref)}">` : '<span class="slot-empty">缺失图片</span>'}<span class="frame-caption"><span>${String(index+1).padStart(2,'0')}</span><span>${escape(step.ref)}</span></span></button>`).join('') || '<div class="timeline-empty">当前没有可预览的帧</div>';
+  timeline.scrollLeft=scroll;
+  timeline.querySelectorAll('[data-index]').forEach(card=>card.onclick=()=>{
+    const index=Number(card.dataset.index); player.pause();
+    if (state.mode === 'source' && state.sourceView === 'processed') selectAdjustmentStep(index); else state.selected=index;
+    player.seek(index); renderInspector(); renderTimeline(); onStep(player.index);
+    if (player.sourceView) { player.sourceView.selected=index; player.draw(); }
+    if (state.mode === 'source' && state.sourceView === 'processed') { renderItems(); renderWorkflow(); }
   });
-  timeline.ondragover = event => { event.preventDefault(); timeline.classList.add('drop-active'); };
-  timeline.ondragleave = () => timeline.classList.remove('drop-active');
-  timeline.ondrop = event => {
-    event.preventDefault(); timeline.classList.remove('drop-active');
-    const ref = event.dataTransfer.getData('application/x-sprite'), action = event.dataTransfer.getData('application/x-action');
-    const original = event.dataTransfer.getData('application/x-timeline');
-    if (ref) addAsset(ref); else if (action && state.mode === 'review') addClip(action);
-    else if (original !== '') moveTimeline(Number(original), cards.length - 1);
-  };
-  $('#source-preview')?.addEventListener('click', () => previewSource(true));
-  $('#duplicate-frame')?.addEventListener('click', duplicateFrame);
-  $('#reverse-frames')?.addEventListener('click', reverseFrames);
-  $('#remove-frame')?.addEventListener('click', removeFrame);
-  $('#add-clip')?.addEventListener('click', () => addClip($('#clip-add-action')?.value || Object.keys(state.data.actions)[0]));
-  $('#remove-clip')?.addEventListener('click', () => change(() => { currentReview()?.clips.splice(state.clip,1); state.clip = Math.max(0,state.clip - 1); }));
+  timeline.ondragover=null; timeline.ondrop=null;
+  $('#timeline-tools').innerHTML=state.mode === 'source' ? '<button id="source-preview">刷新预览</button>' : '';
+  $('#source-preview')?.addEventListener('click',()=>previewSource(true));
 }
-function moveTimeline(from,to) {
-  if (from === to || state.mode === 'source') return;
-  change(() => {
-    if (state.mode === 'review') {
-      const list = currentReview().clips; const [clip] = list.splice(from,1); list.splice(to,0,clip); state.clip = to;
-    } else if (state.playbackMode === 'display') {
-      const action = currentAction(), steps = actionSteps(state.data,state.action,'display');
-      const [step] = steps.splice(from,1); steps.splice(to,0,step); action.animation ||= {};
-      action.animation.order = steps.map(s => s.frame); action.animation.durations_ms = steps.map(s => s.duration_ms); state.selected = to;
-    } else {
-      const action = currentAction(), slots = frames(action).map((_,i) => i);
-      const [slot] = slots.splice(from,1); slots.splice(to,0,slot); const refs = slots.map(i => action.sprites[i]);
-      editFrames(action,slots,refs,state.data.defaults?.fps || 12); state.selected = to;
-    }
-  });
-}
-function duplicateFrame() {
-  if (!currentAction() || !activeSteps().length) return;
-  if (state.playbackMode === 'runtime') addAsset(frames(currentAction())[state.selected],state.selected + 1);
-  else change(() => {
-    const action = currentAction(), steps = actionSteps(state.data,state.action,'display');
-    steps.splice(state.selected + 1,0,{...steps[state.selected]}); action.animation ||= {};
-    action.animation.order = steps.map(s => s.frame); action.animation.durations_ms = steps.map(s => s.duration_ms); state.selected++;
-  });
-}
-function reverseFrames() {
-  if (!currentAction()) return;
-  change(() => {
-    const action = currentAction();
-    if (state.playbackMode === 'display') {
-      const steps = actionSteps(state.data,state.action,'display').reverse(); action.animation ||= {};
-      action.animation.order = steps.map(s => s.frame); action.animation.durations_ms = steps.map(s => s.duration_ms);
-    } else { const slots = frames(action).map((_,i) => i).reverse(); editFrames(action,slots,[...frames(action)].reverse(),state.data.defaults?.fps || 12); }
-    state.selected = 0;
-  });
-}
-function removeFrame() {
-  if (!currentAction() || !activeSteps().length) return;
-  change(() => {
-    const action = currentAction();
-    if (state.playbackMode === 'display') {
-      const steps = actionSteps(state.data,state.action,'display'); if (steps.length === 1) return;
-      steps.splice(state.selected,1); action.animation ||= {}; action.animation.order = steps.map(s => s.frame); action.animation.durations_ms = steps.map(s => s.duration_ms);
-    } else { const slots = frames(action).map((_,i) => i).filter(i => i !== state.selected); editFrames(action,slots,slots.map(i => action.sprites[i]),state.data.defaults?.fps || 12); }
-    state.selected = Math.max(0,state.selected - 1);
-  });
-}
-function addClip(name, at) {
-  if (!currentReview()) { toast('请先创建一个 Review 序列'); return; }
-  if (!name || !frames(state.data.actions[name]).length) { toast('请先为动作添加素材'); return; }
-  change(() => { const clips = currentReview().clips; state.clip = at ?? clips.length; clips.splice(state.clip,0,{action:name,repeat:1,start:0,end:null}); });
-}
+function moveTimeline(from,to) { if (composition.isEditing()) composition.move(from,to); }
+function duplicateFrame() { if (composition.isEditing()) composition.duplicate(); }
+function removeFrame() { if (composition.isEditing()) composition.remove(); }
 
 function renderInspector() {
   $('#inspector-actions').innerHTML = '';
@@ -725,22 +626,7 @@ function renderInspector() {
   if (footer >= 0) $('#inspector-actions').innerHTML = markup.slice(footer);
   if (state.mode === 'source') bindSourceInspector(); else if (state.mode === 'action') bindActionInspector(); else bindReviewInspector();
 }
-function actionInspector() {
-  const action = currentAction();
-  if (!action) return '<p class="muted">创建一个动作，然后从素材库添加帧。</p>';
-  const spec = merge(state.data.defaults,action), steps = activeSteps(), step = steps[state.selected];
-  const refs = frames(action), selectedAsset = asset(step?.ref);
-  return section('动作设置', label('动作 ID',`<input id="action-name" value="${escape(state.action)}" pattern="[A-Za-z0-9_-]+">`) +
-    `<label class="field-inline">游戏帧率 FPS${number('action-fps',spec.fps || 12,'min="1" max="1000" step="0.5"')}</label><label class="field-inline">游戏内循环<input id="action-loop" type="checkbox" ${spec.loop ? 'checked' : ''}></label>` +
-    `<label class="field-inline">图集列数${number('action-columns',spec.pack?.columns || 4,'min="1" max="64"')}</label>`) +
-    section('预览播放',`<div class="mode-switch"><button id="runtime-mode" class="${state.playbackMode === 'runtime' ? 'active' : ''}">游戏播放</button><button id="display-mode" class="${state.playbackMode === 'display' ? 'active' : ''}">展示播放</button></div><p class="hint">游戏播放按帧顺序和 FPS 运行。展示播放可单独排序、重复帧和调整停留时间，导出为 WebP。</p>` +
-    (state.playbackMode === 'display' ? `<label class="field-inline">WebP 循环次数${number('display-loop',action.animation?.loop ?? (spec.loop ? 0 : 1),'min="0" max="65535"')}</label><p class="hint">0 表示无限循环。</p><button id="reset-display" class="wide">展示配置恢复为游戏播放</button>` : '')) +
-    section('所选帧',step ? `<span class="selected-ref">${escape(step.ref)}</span>` + info('帧编号',String(step.frame).padStart(3,'0')) + info('画布',selectedAsset?.size.join(' × ') || '素材尚未就绪') +
-      (selectedAsset?.bbox ? info('有效轮廓',`${selectedAsset.bbox[2] - selectedAsset.bbox[0]} × ${selectedAsset.bbox[3] - selectedAsset.bbox[1]}`) : '') +
-      (state.playbackMode === 'display' ? `<label class="field-inline">此步停留 ms${number('frame-duration',step.duration_ms,'min="1" max="16777215"')}</label>` : info('游戏帧时长',`${step.duration_ms} ms`)) +
-      '<button id="locate-source" class="wide">定位到素材处理 ↗</button>' : '<p class="hint">点击左侧素材，添加第一帧。</p>') +
-    section('动作信息',info('素材帧数',refs.length) + info('展示步数',actionSteps(state.data,state.action,'display').length) + info('共享锚点',state.data.anchor.pixels.join(', ')) + '<p class="hint">动作保存素材引用。修改 processed 素材，会更新所有引用它的动作。</p><button id="delete-action" class="wide danger">删除动作</button>');
-}
+function actionInspector() { return composition.inspector(); }
 function bindValue(id, operation, options = {}) {
   const input = $('#' + id); if (!input) return;
   input.addEventListener('change', () => {
@@ -749,35 +635,7 @@ function bindValue(id, operation, options = {}) {
     change(() => operation(value),options);
   });
 }
-function bindActionInspector() {
-  if (!currentAction()) return;
-  bindValue('action-name', name => {
-    if (name === state.action) return;
-    if (!/^[A-Za-z0-9_-]+$/.test(name) || state.data.actions[name]) { toast('动作 ID 需唯一，只能包含字母、数字、下划线和短横线',true); return; }
-    const previous = state.action; state.data.actions[name] = currentAction(); delete state.data.actions[previous];
-    Object.values(reviews()).forEach(review => review.clips.forEach(clip => { if (clip.action === previous) clip.action = name; })); state.action = name;
-  });
-  bindValue('action-fps', value => { currentAction().fps = value; });
-  bindValue('action-loop', value => { currentAction().loop = value; });
-  bindValue('action-columns', value => { currentAction().pack = {...currentAction().pack,columns:value}; });
-  $('#runtime-mode').onclick = () => { state.playbackMode = 'runtime'; state.selected = 0; player.pause(); renderAll(); };
-  $('#display-mode').onclick = () => { state.playbackMode = 'display'; state.selected = 0; player.pause(); renderAll(); };
-  bindValue('display-loop', value => { currentAction().animation ||= {}; currentAction().animation.loop = value; });
-  bindValue('frame-duration', value => {
-    const steps = actionSteps(state.data,state.action,'display'); steps[state.selected].duration_ms = value;
-    currentAction().animation ||= {}; currentAction().animation.order = steps.map(s => s.frame); currentAction().animation.durations_ms = steps.map(s => s.duration_ms);
-  });
-  $('#reset-display')?.addEventListener('click', () => change(() => { delete currentAction().animation; }));
-  $('#locate-source')?.addEventListener('click', () => {
-    const slot = state.selected, ref = activeSteps()[slot]?.ref;
-    const source = sourceForFrame(state.sources,ref);
-    if (!source) { toast('此帧是已确认或导入的独立素材，可直接在外部修图后重新导入'); return; }
-    state.source = source.file; state.adjustAction = state.action; state.adjustPlaybackMode = state.playbackMode;
-    mode('source'); state.selected = slot; renderAll();
-  });
-  $('#delete-action').onclick = () => deleteSequence('action');
-}
-
+function bindActionInspector() { composition.bindInspector(); }
 function resolvedSource() {
   const own = state.data.sources?.[state.source] || {};
   const defaults = state.data.defaults || {};
@@ -810,7 +668,7 @@ async function saveSlices() {
     if (state.previewError || state.previewKey !== previewKey(state.source)) throw new Error('请先修正切割预览中的错误');
     const regions = regionFrames(), available = new Set(regions.map(frame=>frame.ref));
     const prefix = state.source.replace(/\.[^.]+$/,'') + '/';
-    const broken = Object.values(state.data.actions).flatMap(action=>action.sprites || []).filter(ref=>ref.startsWith(prefix) && !available.has(ref));
+    const broken = allResources(state.data).flatMap(target=>slotsOf(ownCompositionSpec(target),target.kind)).filter(slot=>slot.resource.kind === 'sprite').map(slot=>slot.resource.ref).filter(ref=>ref.startsWith(prefix) && !available.has(ref));
     if (broken.length) throw new Error('区域仍被当前动作草稿引用，请先移除或替换：' + [...new Set(broken)].join('、'));
     const keys = new Set(regions.map(frame=>frame.id));
     if (Object.keys(resolvedSource().process.overrides || {}).some(key=>!keys.has(key))) throw new Error('被移除区域仍有单帧调整，请先重置这些帧');
@@ -1010,44 +868,8 @@ async function previewSource(force = false) {
   }
 }
 
-function reviewInspector() {
-  const review = currentReview(); if (!review) return '<p class="hint">创建预览，再添加动作片段。可将 jump → land、idle → attack 等衔接保存下来反复检查。</p>';
-  const clip = review.clips[state.clip], steps = activeSteps();
-  const names = Object.keys(state.data.actions);
-  return section('Review 设置',label('序列名称',`<input id="review-name" value="${escape(review.name || state.review)}">`) +
-    label('播放参数',`<select id="review-mode"><option value="runtime" ${review.mode !== 'display' ? 'selected' : ''}>游戏播放参数</option><option value="display" ${review.mode === 'display' ? 'selected' : ''}>展示播放参数</option></select>`) +
-    `<label class="field-inline">导出动画循环<input id="review-loop" type="checkbox" ${review.loop ? 'checked' : ''}></label><p class="hint">每个动作按片段的重复次数播放。动作自身的无限循环不会阻止进入下个片段。</p>`) +
-    section('添加片段',label('选择动作',`<select id="clip-add-action">${names.map(name => `<option value="${escape(name)}">${escape(name)}</option>`).join('')}</select>`) + '<button id="inspector-add-clip" class="wide">＋ 添加动作片段</button>') +
-    section('所选片段',clip ? label('动作',`<select id="clip-action">${names.map(name => `<option value="${escape(name)}" ${clip.action === name ? 'selected' : ''}>${escape(name)}</option>`).join('')}</select>`) +
-      `<label class="field-inline">重复次数${number('clip-repeat',clip.repeat,'min="1" max="100"')}</label><div class="field-row">${label('起始步（0 起）',number('clip-start',clip.start || 0,'min="0"'))}${label('结束步（含）',number('clip-end',clip.end ?? '', 'min="0" placeholder="最后一帧"'))}</div>` +
-      '<p class="hint">范围基于所选播放模式中的步骤编号。</p><div class="boundary-controls"><button id="before-boundary">衔接前一帧</button><button id="after-boundary">片段第一帧</button></div><button id="remove-current-clip" class="wide danger">移除此片段</button>' : '<p class="hint">选择一个动作片段。</p>') +
-    section('检查辅助','<p class="hint">开启“前帧叠图”，在衔接第一帧对比上个动作的末帧。开启“Idle 参考”，检查身体尺寸和基准位置。</p>' + info('片段数',review.clips.length) + info('播放步数',steps.length) + info('总时长',(steps.reduce((sum,s) => sum + s.duration_ms,0) / 1000).toFixed(2) + 's') + '<button id="delete-review" class="wide danger">删除 Review</button>');
-}
-function bindReviewInspector() {
-  const review = currentReview(); if (!review) return;
-  const clip = review.clips[state.clip];
-  bindValue('review-name',value => { review.name = value; });
-  bindValue('review-mode',value => { review.mode = value; review.clips.forEach(c => { c.start = 0; c.end = null; }); });
-  bindValue('review-loop',value => { review.loop = value; });
-  $('#inspector-add-clip').onclick = () => addClip($('#clip-add-action').value);
-  if (clip) {
-    bindValue('clip-action',value => { clip.action = value; clip.start = 0; clip.end = null; });
-    [['clip-repeat','repeat'],['clip-start','start'],['clip-end','end']].forEach(([id,key]) => bindValue(id,value => {
-      const count = actionSteps(state.data,clip.action,review.mode).length;
-      if ((key === 'start' && (value === null || value >= count || value > (clip.end ?? count - 1))) || (key === 'end' && value !== null && (value < clip.start || value >= count))) {
-        toast(`片段范围必须位于 0–${count - 1}，起始步不能大于结束步`,true); return;
-      }
-      clip[key] = value;
-    }));
-    const seekBoundary = previous => {
-      const index = activeSteps().findIndex(step => step.clip === state.clip);
-      player.pause(); player.seek(Math.max(0,index - (previous ? 1 : 0))); onStep(player.index);
-    };
-    $('#before-boundary').onclick = () => seekBoundary(true); $('#after-boundary').onclick = () => seekBoundary(false);
-    $('#remove-current-clip').onclick = () => change(() => { review.clips.splice(state.clip,1); state.clip = Math.max(0,state.clip - 1); });
-  }
-  $('#delete-review').onclick = () => deleteSequence('review');
-}
+function reviewInspector() { return composition.inspector(); }
+function bindReviewInspector() { composition.bindInspector(); }
 
 // Drag only the selected preview image; stored PNGs and alignment overlays stay put.
 function canDragFrame() {
@@ -1143,8 +965,8 @@ function cancelRegionDrag(redraw = true) {
 function removeRegion() {
   const regions=regionFrames(), frame=regions[state.selected]; if (!frame) return;
   if (regions.length<=1) { toast('至少保留一个区域；也可删除整张原图',true); return; }
-  const used=Object.entries(state.data.actions).filter(([,action])=>(action.sprites || []).includes(frame.ref)).map(([name])=>name);
-  if (used.length) { toast('此区域被动作引用：' + used.join('、') + '。请先移除或替换引用。',true); return; }
+  const used=resourceUsers(state.data,{kind:'sprite',ref:frame.ref}).map(item=>item.ref);
+  if (used.length) { toast('此区域被资源引用：' + used.join('、') + '。请先移除或替换引用。',true); return; }
   if (resolvedSource().process.overrides?.[frame.id]) { toast('此区域仍有单帧调整，请先在调整页重置',true); return; }
   const nextId=sliceNextId();
   change(()=>{ regions.splice(state.selected,1); setManualRegions(regions,nextId); state.selected=Math.min(state.selected,regions.length-1); },{preview:true});
@@ -1217,30 +1039,22 @@ $('#adjust-playback').onchange=()=>{
 document.querySelectorAll('button[data-mode]').forEach(button => { button.onclick = () => mode(button.dataset.mode,button.dataset.view); });
 $('#action-edit').onclick = () => mode('action');
 $('#action-review').onclick = () => mode('review');
+$('#asset-kind').onchange = () => { $('#asset-source').value=''; renderLibrary(); };
 $('#asset-search').oninput = renderLibrary; $('#asset-source').onchange = renderLibrary;
 $('#asset-multiselect').onchange = () => { state.libraryMulti = $('#asset-multiselect').checked; if (!state.libraryMulti) state.assetSelection.clear(); renderLibrary(); };
-$('#assets-select-visible').onclick = () => { state.libraryMulti = true; visibleAssets().forEach(a => state.assetSelection.add(a.ref)); renderLibrary(); };
+$('#assets-select-visible').onclick = () => { state.libraryMulti = true; visibleAssets().forEach(a => state.assetSelection.add(resourceKey(a.resource))); renderLibrary(); };
 $('#assets-clear').onclick = () => { state.assetSelection.clear(); state.lastAsset = null; renderLibrary(); };
-$('#assets-add').onclick = () => addAssets(state.assets.filter(a => state.assetSelection.has(a.ref)).map(a => a.ref));
+$('#assets-add').onclick = () => composition.insert(composition.selection().map(item=>item.resource));
 function deleteSequence(kind) {
   if (state.busy || !state.data || !['action','review'].includes(kind)) return;
-  const id = state[kind], sequences = kind === 'action' ? state.data.actions : reviews();
-  if (!id || !sequences[id]) return;
-  if (kind === 'action') {
-    const usedBy = Object.entries(reviews()).filter(([,review]) => review.clips.some(clip => clip.action === id));
-    if (usedBy.length) {
-      toast(`此动作仍被 Review「${usedBy.map(([key,review]) => review.name || key).join('、')}」引用，请先移除相应片段或删除这些序列`,true);
-      return;
-    }
-  }
-  const name = kind === 'action' ? `动作 ${id}` : `Review 序列「${sequences[id].name || id}」`;
-  const retained = kind === 'action' ? '素材图片' : '动作和素材图片';
-  if (!confirm(`删除${name}？${retained}会保留，可撤销；保存工程后生效。`)) return;
-  player.pause(); player.index = 0;
-  change(() => {
-    delete sequences[id]; state[kind] = Object.keys(sequences)[0]; state.selected = 0; state.clip = 0;
-  });
-  toast(`已删除${name}，可撤销；保存工程后生效`);
+  const ref=state[kind], collection=kind === 'action' ? state.data.actions : reviews();
+  if (!ref || !collection[ref]) return;
+  const target={kind:kind === 'action' ? 'action' : 'sequence',ref};
+  const users=resourceUsers(state.data,target);
+  if (users.length) { toast(`此资源仍被 ${users.map(item=>item.ref).join('、')} 引用，请先移除相应槽位`,true); return; }
+  if (!confirm(`删除 ${collection[ref].name || ref}？素材图片会保留，可撤销；保存工程后生效。`)) return;
+  player.pause();
+  change(()=>{ delete collection[ref]; state[kind]=Object.keys(collection)[0]; state.slot=0; state.clip=0; state.selected=0; });
 }
 async function deleteMaterials(kind, references) {
   if (state.busy || !references.length) return;
@@ -1253,7 +1067,7 @@ async function deleteMaterials(kind, references) {
     toast(`已删除 ${snapshot.deleted} 项，工程已保存`);
   });
 }
-$('#assets-delete').onclick = () => deleteMaterials('processed',state.assets.filter(a => state.assetSelection.has(a.ref)).map(a => a.ref));
+$('#assets-delete').onclick = () => composition.deleteSelected();
 $('#delete-item').onclick = () => {
   if (['action','review'].includes(state.mode)) return deleteSequence(state.mode);
   return state.mode === 'source' ? deleteMaterials('source',state.source ? [state.source] : []) : deleteMaterials('reference',state.reference ? [state.reference] : []);
@@ -1265,10 +1079,10 @@ $('#new-item').onclick = () => {
     const name = prompt('新动作 ID（字母、数字、下划线、短横线）',uid('action'));
     if (!name) return;
     if (!/^[A-Za-z0-9_-]+$/.test(name) || state.data.actions[name]) { toast('动作 ID 无效或已存在',true); return; }
-    change(() => { state.data.actions[name] = {fps:12,loop:false,sprites:null}; state.action = name; state.selected = 0; state.playbackMode = 'runtime'; });
+    change(() => { state.data.actions[name] = {fps:12,loop:false,slots:[]}; state.action = name; state.slot=0; state.selected = 0; state.playbackMode = 'runtime'; });
   } else {
     const name = prompt('Review 名称','新的衔接检查'); if (!name) return;
-    change(() => { state.data.workbench ||= {}; state.data.workbench.reviews ||= {}; const id = uid('review'); reviews()[id] = {name,loop:true,mode:'runtime',clips:[]}; state.review = id; state.clip = 0; });
+    change(() => { state.data.workbench ||= {}; state.data.workbench.reviews ||= {}; const id = uid('review'); reviews()[id] = {name,loop:true,mode:'runtime',slots:[]}; state.review = id; state.clip = 0; });
   }
 };
 $('#save').onclick = save;
@@ -1403,7 +1217,8 @@ $('#reference-upload').onchange = () => uploadFile($('#reference-upload'),'refer
 $('#play').onclick = () => { player.toggle(); $('#play').textContent = player.playing ? 'Ⅱ' : '▶'; };
 function singleStep(delta) {
   player.pause(); player.seek(player.index + delta);
-  if (state.mode !== 'review') { if (state.mode === 'source' && state.sourceView === 'processed') selectAdjustmentStep(player.index); else state.selected = player.index; renderInspector(); renderTimeline(); onStep(player.index); }
+  if (composition.isEditing()) { state.selected=player.index; composition.selectIndex(player.steps[player.index]?.slot || 0); renderInspector(); renderTimeline(); onStep(player.index); }
+  else { if (state.mode === 'source' && state.sourceView === 'processed') selectAdjustmentStep(player.index); else state.selected = player.index; renderInspector(); renderTimeline(); onStep(player.index); }
 }
 $('#previous').onclick = () => singleStep(-1); $('#next').onclick = () => singleStep(1);
 $('#speed').onchange = () => { player.speed = Number($('#speed').value); };
@@ -1414,7 +1229,7 @@ $('#background').onchange = () => { $('#canvas-area').classList.remove('dark','l
 
 function openExport() {
   const list = $('#export-action-list');
-  list.innerHTML = Object.entries(state.data.actions).filter(([,action]) => frames(action).length).map(([name]) => `<label><input type="checkbox" value="${escape(name)}" ${name === state.action ? 'checked' : ''}>${escape(name)}</label>`).join('');
+  list.innerHTML = Object.entries(state.data.actions).filter(([name]) => actionSteps(state.data,name).length).map(([name]) => `<label><input type="checkbox" value="${escape(name)}" ${name === state.action ? 'checked' : ''}>${escape(name)}</label>`).join('');
   $('#export-format').value = state.mode === 'review' ? 'review' : 'all'; updateExportFormat(); $('#export-dialog').showModal();
 }
 function updateExportFormat() {
@@ -1440,7 +1255,7 @@ $('#export-form').onsubmit = async event => {
   const format = $('#export-format').value;
   const actions = [...$('#export-action-list').querySelectorAll('input:checked')].map(input => input.value);
   if (!['project','review'].includes(format) && !actions.length) { toast('请至少选择一个动作',true); return; }
-  if (format === 'review' && !currentReview()?.clips.length) { toast('请先创建预览 并添加动作片段',true); return; }
+  if (format === 'review' && !reviewSteps(state.data,currentReview()).length) { toast('请先创建序列并添加资源槽位',true); return; }
   const submit = $('#export-submit'); submit.disabled = true; submit.textContent = '正在生成…';
   $('#export-close').disabled = true; $('#export-format').disabled = true;
   $('#export-progress-box').hidden = false; $('#export-cancel').disabled = false;
@@ -1497,7 +1312,7 @@ document.addEventListener('keydown', event => {
   else if (event.code === 'Space') { event.preventDefault(); if (!$('#play').disabled) $('#play').click(); }
   else if (event.key === 'ArrowLeft') { event.preventDefault(); singleStep(-1); }
   else if (event.key === 'ArrowRight') { event.preventDefault(); singleStep(1); }
-  else if (event.key === 'Delete' && state.mode === 'action') removeFrame();
+  else if (event.key === 'Delete' && composition.isEditing()) removeFrame();
 });
 window.addEventListener('beforeunload',event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
 async function start() {

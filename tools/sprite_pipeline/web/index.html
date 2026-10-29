@@ -62,9 +62,9 @@
       <div id="item-list" class="item-list"></div>
       <div id="sidebar-context" class="sidebar-context"></div>
       <div class="library-heading"><h2>素材库 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
-      <div class="library-filters"><input id="asset-search" type="search" placeholder="搜索素材…" aria-label="搜索素材"><select id="asset-source" aria-label="筛选素材来源"><option value="">全部来源</option></select></div>
+      <div class="library-kind"><label>资源类型<select id="asset-kind" aria-label="筛选资源类型"><option value="">全部资源</option><option value="sprite">单帧</option><option value="action">动作</option><option value="sequence">序列</option></select></label></div><div class="library-filters"><input id="asset-search" type="search" placeholder="搜索素材…" aria-label="搜索素材"><select id="asset-source" aria-label="筛选素材来源"><option value="">全部来源</option></select></div>
       <div class="library-selection"><label><input id="asset-multiselect" type="checkbox"> 多选</label><button id="assets-select-visible" class="text-button">全选当前结果</button><button id="assets-clear" class="text-button">清空</button></div>
-      <div id="asset-selection-actions" class="selection-actions" hidden><span id="asset-selection-count">已选 0 张</span><button id="assets-add" class="text-button">加入动作</button><button id="assets-delete" class="text-button danger">删除</button></div>
+      <div id="asset-selection-actions" class="selection-actions" hidden><span id="asset-selection-count">已选 0 项</span><button id="assets-add" class="text-button">加入动作</button><button id="assets-delete" class="text-button danger">删除</button></div>
       <div id="asset-library" class="asset-library"></div>
       <div class="sidebar-footer"><button id="prepare" title="只生成缺失的 processed 素材，不覆盖现有图片">准备缺失素材</button><button id="migrate" title="将现有最终帧保留为可复用素材，并更新动作引用">保留已有最终帧</button></div>
     </aside>
@@ -72,6 +72,7 @@
     <div id="left-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整素材区宽度" aria-orientation="vertical" aria-controls="materials-pane"></div>
     <section id="canvas-pane" class="editor" tabindex="-1">
       <div id="reference-board" class="reference-board" hidden></div>
+      <div id="resource-navigation" class="resource-navigation" hidden><button id="resource-back" class="text-button">← 返回父组合</button><span id="resource-navigation-label"></span></div>
       <div id="action-navigation" class="action-navigation" hidden><button id="action-edit">动作编排</button><button id="action-review">衔接检查</button></div>
       <div id="slice-tools" class="slice-tools" hidden><button id="slice-select" class="active" title="选中区域后可直接移动，拖动边角调整大小">选择 / 移动</button><button id="slice-create" title="在原图上拖拽创建新区域">＋ 新建区域</button><span>拖动边角缩放 · Shift + 方向键移动 10 px</span></div>
       <div id="adjustment-context" class="adjustment-context" hidden><label>预览动作 <select id="adjust-action" aria-label="调整预览动作"></select></label><select id="adjust-playback" aria-label="调整播放方式"><option value="runtime">游戏播放</option><option value="display">展示播放</option></select><span id="adjust-context-note"></span></div>
