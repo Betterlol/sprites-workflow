@@ -15,6 +15,7 @@ from sprite_pipeline.storage.files import write_json
 
 OUTPUT_DIRS = ("source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+REFERENCE_IMAGE_SUFFIXES = IMAGE_SUFFIXES | {".gif"}
 from sprite_pipeline.domain.validation import NAME, integer, merge, positive
 
 PROJECT_PATHS = {

@@ -811,6 +811,69 @@ class ProjectWorkflowTests(unittest.TestCase):
         self.assertEqual(len(response.json()["references"]), 1)
         self.assertTrue((self.root / "fish/references/identity.png").is_file())
 
+    def test_reference_gif_stays_one_animated_file_through_view_backup_and_delete(self):
+        snapshot = self.create()
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 24), "red").save(
+            buffer, format="GIF", save_all=True,
+            append_images=[Image.new("RGB", (16, 24), "blue")],
+            duration=[80, 170], loop=2,
+        )
+        content = buffer.getvalue()
+        response = self.post("upload", snapshot, kind="reference", filename="motion.GIF",
+                             content=base64.b64encode(content).decode())
+        self.assertEqual(response.status_code, 200, response.text)
+        snapshot = response.json()
+        self.assertEqual(snapshot["sources"], [])
+        self.assertEqual(snapshot["assets"], [])
+        self.assertEqual(len(snapshot["references"]), 1)
+        reference = snapshot["references"][0]
+        self.assertEqual(reference["ref"], "references/motion.GIF")
+        self.assertEqual(reference["size"], [16, 24])
+        project = self.root / "fish"
+        self.assertEqual(list((project / "references").iterdir()), [project / reference["ref"]])
+        for directory in ("source", "source_sprites", "processed_sprites"):
+            self.assertEqual(list((project / directory).rglob("*")), [])
+        served = self.client.get(reference["url"])
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.headers["content-type"], "image/gif")
+        self.assertEqual(served.content, content)
+        with Image.open(io.BytesIO(served.content)) as image:
+            self.assertEqual(image.n_frames, 2)
+            self.assertEqual(image.info["loop"], 2)
+            self.assertEqual(image.info["duration"], 80)
+            image.seek(1)
+            self.assertEqual(image.info["duration"], 170)
+        snapshot = self.snapshot()
+        backup = self.post("export", snapshot, options={"format": "project"})
+        self.assertEqual(backup.status_code, 200, backup.text[:100])
+        with zipfile.ZipFile(io.BytesIO(backup.content)) as archive:
+            self.assertEqual(archive.read("references/motion.GIF"), content)
+        deleted = self.post("delete", snapshot, kind="reference", references=[reference["ref"]])
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["references"], [])
+        self.assertFalse((project / reference["ref"]).exists())
+
+    def test_external_gif_references_in_both_directories_are_version_protected(self):
+        for directory in ("references", "reference"):
+            with self.subTest(directory=directory):
+                snapshot = self.create(directory)
+                root = self.root / directory / directory
+                root.mkdir(exist_ok=True)
+                path = root / "motion.gif"
+                Image.new("RGB", (16, 24), "red").save(path)
+                current = self.snapshot(directory)
+                self.assertNotEqual(current["asset_revision"], snapshot["asset_revision"])
+                self.assertEqual(current["references"][0]["ref"], f"{directory}/motion.gif")
+                self.assertEqual(self.client.get(current["references"][0]["url"]).status_code, 200)
+                before = path.stat()
+                Image.new("RGB", (16, 24), "blue").save(path)
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1000000))
+                rejected = self.post("delete", current, directory, kind="reference",
+                                     references=[f"{directory}/motion.gif"])
+                self.assertEqual(rejected.status_code, 409, rejected.text)
+                self.assertTrue(path.is_file())
+
     def test_cli_batch_import_reports_failures_and_continues_and_cli_delete_is_shared(self):
         self.create()
         a, b = self.root.parent / "a.png", self.root.parent / "b.png"

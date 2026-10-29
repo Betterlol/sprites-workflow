@@ -13,6 +13,7 @@ from sprite_pipeline.domain.errors import ConflictError
 from sprite_pipeline.storage.cache import RenderCache
 from sprite_pipeline.storage.configuration import (
     IMAGE_SUFFIXES,
+    REFERENCE_IMAGE_SUFFIXES,
     Config,
     ConfigRepository,
     config_from_data,
@@ -90,9 +91,10 @@ class ProjectSession:
             ("final", cfg.directory("sprites")),
             *((name, self.reference_root(name)) for name in REFERENCE_DIRS),
         ):
+            suffixes = REFERENCE_IMAGE_SUFFIXES if kind in REFERENCE_DIRS else IMAGE_SUFFIXES
             for path in sorted(root.rglob("*")):
                 if not path.is_file() or (
-                    path.suffix.lower() not in IMAGE_SUFFIXES and path.name != "_stage.json"
+                    path.suffix.lower() not in suffixes and path.name != "_stage.json"
                 ):
                     continue
                 relative = path.relative_to(root).as_posix()
@@ -151,7 +153,8 @@ class ProjectSession:
                 self.reference_root(directory)
             ):
                 raise ValueError("Reference images must be inside references/ or legacy reference/")
-        if path.suffix.lower() not in IMAGE_SUFFIXES or not path.is_file():
+        suffixes = REFERENCE_IMAGE_SUFFIXES if kind == "reference" else IMAGE_SUFFIXES
+        if path.suffix.lower() not in suffixes or not path.is_file():
             raise FileNotFoundError(reference)
         return path
 

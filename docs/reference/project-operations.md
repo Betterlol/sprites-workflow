@@ -70,6 +70,8 @@ python tools/projects.py save dafeiyu --data path/to/pipeline-draft.json --revis
 
 新工程使用 `references/`；旧 `reference/` 继续读取和备份，不自动重命名。参考图的 `--ref` 包含目录前缀，例如 `references/identity.png`；source 的引用相对 `source/`，processed 的引用相对 `processed_sprites/`。
 
+`import --kind reference` 支持 GIF；保留原始文件、动画时长和循环设置，不拆帧、不转成 PNG。参考图列表、删除、素材版本保护与完整工程备份均包含 GIF，旧 `reference/` 下的 GIF 也可读取。
+
 分阶段构建仍可使用：
 
 ```powershell

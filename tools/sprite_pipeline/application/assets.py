@@ -15,7 +15,7 @@ from sprite_pipeline.application.session import ProjectSession
 from sprite_pipeline.domain.actions import action_steps, validate_editor
 from sprite_pipeline.domain.resources import sprite_users
 from sprite_pipeline.imaging.png import png_bytes
-from sprite_pipeline.storage.configuration import IMAGE_SUFFIXES, inside
+from sprite_pipeline.storage.configuration import IMAGE_SUFFIXES, REFERENCE_IMAGE_SUFFIXES, inside
 from sprite_pipeline.storage.files import numbered_frames, read_image, write_json
 from sprite_pipeline.storage.history import OperationNotStarted
 
@@ -99,7 +99,8 @@ class AssetOperations:
                 or filename.endswith((" ", "."))
             ):
                 raise ValueError("Use an image filename without directory components")
-            if Path(filename).suffix.lower() not in IMAGE_SUFFIXES:
+            suffixes = REFERENCE_IMAGE_SUFFIXES if kind == "reference" else IMAGE_SUFFIXES
+            if Path(filename).suffix.lower() not in suffixes:
                 raise ValueError("Unsupported image format")
             with Image.open(io.BytesIO(content)) as original:
                 original.load()

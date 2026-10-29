@@ -9,7 +9,11 @@ from PIL import Image
 from sprite_pipeline.application.contracts import QueryContext
 from sprite_pipeline.application.presentation import image_url
 from sprite_pipeline.domain.resources import sprite_users
-from sprite_pipeline.storage.configuration import IMAGE_SUFFIXES, inside, source_fingerprint
+from sprite_pipeline.storage.configuration import (
+    REFERENCE_IMAGE_SUFFIXES,
+    inside,
+    source_fingerprint,
+)
 
 REFERENCE_DIRS = ("references", "reference")
 
@@ -74,7 +78,7 @@ def project_state(session: QueryContext) -> dict:
         for name in REFERENCE_DIRS:
             root = session.reference_root(name)
             for path in sorted(root.rglob("*")):
-                if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
+                if path.is_file() and path.suffix.lower() in REFERENCE_IMAGE_SUFFIXES:
                     relative = path.relative_to(root).as_posix()
                     inside(root, relative)
                     ref = name + "/" + relative
