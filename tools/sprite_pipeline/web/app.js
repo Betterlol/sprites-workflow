@@ -1,3 +1,4 @@
+import {createExplorer} from './explorer.js';
 import {clone, actionSteps, reviewSteps, defaultReviews, merge, roundMs} from './model.js';
 import {createCompositionUI} from './composition.js';
 import {allResources,resourceKey,resourceUsers,slotsOf,renameResource,reconcileCompositeAnimations,validateComposition} from './resources.js';
@@ -31,6 +32,7 @@ state.adjustPlaybackMode = 'runtime';
 
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
 const composition = createCompositionUI({state,$,escape,player,asset,change,renderAll,renderInspector,showPane,mode,steps:activeSteps,onStep,sourceForFrame,deleteMaterials,deleteSequence,renameResource,toast,updateSaveStatus,confirm:message=>confirm(message)});
+const explorer = createExplorer({state,$,escape,composition,mode});
 const LAYOUT_KEY = 'sprite-workbench-layout';
 let storedLayout = {};
 try { storedLayout = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {}; } catch {}
@@ -429,7 +431,12 @@ function renderAll() {
   if (!state.data.actions[state.action]) state.action = actionNames[0];
   if (!state.data.actions[state.adjustAction]) state.adjustAction = '';
   if (!reviews()[state.review]) state.review = Object.keys(reviews())[0];
-  document.querySelectorAll('button[data-mode]').forEach(button => {
+  $('#adjust-playback').onchange=()=>{
+  player.pause(); state.adjustPlaybackMode=$('#adjust-playback').value; selectAdjustmentStep(0);
+  state.previewEpoch++; renderAll(); schedulePreview();
+};
+
+document.querySelectorAll('button[data-mode]').forEach(button => {
     const active = (button.dataset.mode === state.mode || button.dataset.mode === 'action' && state.mode === 'review') && (!button.dataset.view || button.dataset.view === state.sourceView);
     button.classList.toggle('active', active); button.setAttribute('aria-selected', active);
   });
@@ -450,7 +457,7 @@ function renderWorkflow() {
   document.body.dataset.mode = state.mode;
   document.body.dataset.sourceView = state.sourceView;
   $('#editor-kind').textContent = {reference:'角色资料',source:slicing ? '切割原帧' : '调整与对齐',action:'动作编排',review:'衔接检查'}[state.mode];
-  $('#sidebar-title').textContent = {reference:'人设与参考',source:'原图素材',action:'动作列表',review:'衔接序列'}[state.mode];
+  $('#sidebar-title').textContent = '工作目录';
   $('#inspector-title').textContent = {reference:'角色约定',source:slicing ? '切割设置' : '帧调整',action:'动作设置',review:'衔接设置'}[state.mode];
   $('#inspector-step').textContent = state.mode === 'source' ? slicing ? '02 / 05' : '03 / 05' : '';
   $('#timeline-title').textContent = state.mode === 'source' ? slicing ? '原帧预览 · 保留原始尺寸' : '调整预览 · 点击选择单帧' : $('#timeline-title').textContent;
@@ -468,8 +475,6 @@ function renderWorkflow() {
   $('#action-edit').classList.toggle('active',state.mode === 'action');
   $('#action-review').classList.toggle('active',state.mode === 'review');
   const idle = asset(state.data.actions.idle ? actionSteps(state.data,'idle')[0]?.ref : null);
-  $('#sidebar-context').innerHTML = state.mode !== 'reference' ? `<h3>当前 IDLE 首帧</h3>${idle ? `<img src="${escape(idle.url)}" alt="当前 IDLE 动作首帧"><p>用于播放时的基准对照</p>` : '<p>还没有可用的 idle 动作。可先完成原帧调整，再编排动作。</p>'}<button id="context-reference" class="text-button">查看角色参考 →</button>` : '<p>导入人设或已确认的参考图，随时对照角色形象。</p>';
-  $('#context-reference')?.addEventListener('click',() => mode('reference'));
   if (state.mode === 'reference') {
     const ref = referenceInfo();
     $('#reference-board').innerHTML = `<div class="reference-heading"><span class="eyebrow">CHARACTER REFERENCE</span><h1>先对齐角色，再开始创作</h1><p>对照人设与当前 IDLE，检查形象、比例和配色。</p></div><div class="reference-comparison"><section><header><h2>人设参考</h2><button id="board-import" class="text-button">＋ 导入参考图</button></header><div class="reference-art">${ref ? `<img src="${escape(ref.url)}" alt="${escape(ref.file)}">` : '<div class="reference-empty">还没有参考图<br><small>导入人设图，开始建立角色</small></div>'}</div><footer>${escape(ref?.file || '支持 PNG、WebP 等图片')}</footer></section><section><header><h2>当前 IDLE 首帧</h2><span class="badge">播放参考</span></header><div class="reference-art checker">${idle ? `<img src="${escape(idle.url)}" alt="当前 IDLE 首帧">` : '<div class="reference-empty">尚未建立 idle 动作<br><small>完成切割和调整后，在动作页添加帧</small></div>'}</div><footer>${escape(idle?.ref || '当前未绑定可播放的 IDLE')}</footer></section></div><div class="reference-next"><p>参考图用于对照；要制作动画，请另行导入动作原图。</p><button id="board-next" class="primary">开始切割原图 →</button></div>`;
@@ -477,27 +482,7 @@ function renderWorkflow() {
     $('#board-next').onclick = () => mode('source','original');
   }
 }
-function renderItems() {
-  const items = state.mode === 'source' ? state.sources.map(source => ({id:source.file,name:source.file,count:source.count,stale:source.stale,url:source.url}))
-    : state.mode === 'reference' ? state.references.map(image => ({id:image.ref,name:image.file,count:image.size.join('×'),url:image.url}))
-    : Object.entries(state.mode === 'action' ? state.data.actions : reviews()).map(([id,spec])=>{
-      const steps=state.mode === 'action' ? actionSteps(state.data,id) : reviewSteps(state.data,spec);
-      return {id,name:spec.name || id,count:slotsOf(spec,state.mode === 'action' ? 'action' : 'sequence').length,url:asset(steps[0]?.ref)?.url};
-    });
-  const selected={source:state.source,action:state.action,review:state.review,reference:state.reference}[state.mode];
-  $('#item-list').innerHTML=items.map(item=>`<button class="item-row ${item.id === selected ? 'active' : ''}" data-item="${escape(item.id)}" title="${escape(item.name)}">${item.url ? `<img class="item-thumbnail" src="${escape(item.url)}" alt="" loading="lazy">` : '<span class="item-icon">▧</span>'}<span class="item-name">${escape(item.name)}</span><small>${item.stale ? '待更新' : escape(item.count)}</small></button>`).join('') || '<p class="hint" style="padding:12px">点击 ＋ 开始创建</p>';
-  $('#item-list').querySelectorAll('[data-item]').forEach(button=>{
-    button.onclick=()=>{
-      state[state.mode]=button.dataset.item; state.slot=0; state.selected=0; state.clip=0; player.pause();
-      if (state.mode === 'source') { state.preview=null; state.previewKey=null; state.previewError=null; state.previewEpoch++; if (state.sourceView === 'processed') chooseAdjustmentAction(); schedulePreview(); }
-      renderAll();
-    };
-    if (['action','review'].includes(state.mode)) {
-      button.draggable=true;
-      button.ondragstart=event=>event.dataTransfer.setData('application/x-resource',JSON.stringify({kind:state.mode === 'action' ? 'action' : 'sequence',ref:button.dataset.item}));
-    }
-  });
-}
+function renderItems() { explorer.render(); }
 function renderLibraryFilters() {
   const select = $('#asset-source'), value = select.value;
   const groups = [...new Set(state.assets.map(a => a.ref.split('/').slice(0,-1).join('/')))];
@@ -505,7 +490,7 @@ function renderLibraryFilters() {
   if (groups.includes(value)) select.value = value;
 }
 function visibleAssets() { return composition.visible(); }
-function renderLibrary() { composition.renderLibrary(); }
+function renderLibrary() { $('#asset-kind').value='sprite'; composition.renderLibrary(); $('#directory-frame-count').textContent=state.assets.length; }
 function selectAsset(ref,event={}) { composition.toggleSelection(`sprite:${ref}`,event); }
 function addAsset(ref,at) { composition.insert([{kind:'sprite',ref}],at); }
 function addAssets(refs,at) { composition.insert(refs.map(ref=>({kind:'sprite',ref})),at); }
@@ -1036,11 +1021,6 @@ $('#adjust-action').onchange=()=>{
   if (state.adjustAction) $('#loop-preview').checked=!!merge(state.data.defaults,state.data.actions[state.adjustAction]).loop;
   state.previewEpoch++; renderAll(); schedulePreview();
 };
-$('#adjust-playback').onchange=()=>{
-  player.pause(); state.adjustPlaybackMode=$('#adjust-playback').value; selectAdjustmentStep(0);
-  state.previewEpoch++; renderAll(); schedulePreview();
-};
-
 document.querySelectorAll('button[data-mode]').forEach(button => { button.onclick = () => mode(button.dataset.mode,button.dataset.view); });
 $('#action-edit').onclick = () => mode('action');
 $('#action-review').onclick = () => mode('review');

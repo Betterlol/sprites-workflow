@@ -12,9 +12,18 @@
 <body class="project-home">
   <header class="topbar">
     <a class="brand" href="/" aria-label="Sprite Workbench 首页"><span class="brand-mark">S<span>·</span></span><span>Sprite <span class="brand-sub">Workbench</span></span></a>
-    <div class="project-label"><span class="status-dot"></span><span id="project-name">正在打开工程…</span><span class="local-tag">LOCAL</span></div>
-    <button id="projects-open" class="subtle">工程列表</button>
-    <div class="top-actions">
+    <div class="project-label project-breadcrumb"><button id="projects-open" class="text-button">My Projects</button><span class="breadcrumb-divider">/</span><span id="project-name">正在打开工程…</span></div>
+  <nav class="modebar" aria-label="工作模式">
+    <div class="mode-tabs" role="tablist">
+      <button data-mode="reference" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 21v-3a7 7 0 0 1 14 0v3"/></svg>角色基准</button>
+      <button data-mode="source" data-view="original" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 3v14a3 3 0 0 0 3 3h14M9 3v12h12"/></svg>切割</button>
+      <button data-mode="source" data-view="processed" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>调整</button>
+      <button data-mode="action" role="tab" aria-selected="true" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg>动作</button>
+      <button id="export-open" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>导出</button>
+    </div>
+
+  </nav>
+    <div class="top-actions"><span id="save-status" class="save-status">工程载入中</span>
       <button id="undo" class="icon-button" title="撤销 Ctrl+Z" aria-label="撤销">↶</button>
       <button id="redo" class="icon-button" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button>
       <details class="project-menu"><summary>工程选项</summary><div><button id="settings-open">工程设置</button><button id="history-open">版本记录</button><button id="reload">重新载入</button></div></details>
@@ -32,23 +41,9 @@
   <div id="external-change" class="external-change" hidden role="status"><span id="external-message"></span><button id="external-merge" hidden>合并配置</button><button id="external-refresh">刷新</button><button id="draft-download">下载配置草稿</button></div>
   <div id="job-banner" class="job-banner" hidden><span id="job-status" role="status">正在准备素材…</span><progress id="job-progress" value="0" max="1" aria-label="素材准备进度"></progress><button id="job-cancel" type="button">取消准备</button></div>
 
-  <nav class="modebar" aria-label="工作模式">
-    <div class="mode-tabs" role="tablist">
-      <button data-mode="reference" role="tab" aria-selected="false"><span>01</span> 角色基准</button>
-      <button data-mode="source" data-view="original" role="tab" aria-selected="false"><span>02</span> 切割</button>
-      <button data-mode="source" data-view="processed" role="tab" aria-selected="false"><span>03</span> 调整</button>
-      <button data-mode="action" role="tab" aria-selected="true" class="active"><span>04</span> 动作</button>
-      <button id="export-open" aria-haspopup="dialog"><span>05</span> 导出 ↗</button>
-    </div>
-    <span id="save-status" class="save-status">工程载入中</span>
-  </nav>
 
-  <div id="workflow-status" class="workflow-status" role="status" aria-live="polite" aria-atomic="true">
-    <span id="draft-state" data-state="quiet">工程：载入中</span>
-    <span id="preview-state" data-state="quiet">处理预览：未选择原图</span>
-    <span id="material-state" data-state="quiet">素材：载入中</span>
-    <span id="activity-state" data-state="busy" hidden></span>
-  </div>
+
+
 
   <nav id="pane-switch" class="pane-switch" aria-label="工作区域">
     <button id="pane-materials" type="button" data-pane="materials" aria-pressed="false">素材</button>
@@ -58,19 +53,25 @@
 
   <main id="workspace" class="workspace">
     <aside id="materials-pane" class="sidebar">
-      <div class="panel-heading"><h1 id="sidebar-title">动作库</h1><div class="item-actions"><button id="delete-item" class="text-button danger" hidden>删除</button><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div></div>
-      <div id="item-list" class="item-list"></div>
-      <div id="sidebar-context" class="sidebar-context"></div>
-      <div class="library-heading"><h2>素材库 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
+      <div class="panel-heading directory-heading"><h1 id="sidebar-title">工作目录</h1><div class="item-actions"><button id="delete-item" class="text-button danger" hidden>删除</button><button id="new-item" class="icon-button" aria-label="新建动作">＋</button></div></div>
+      <div class="directory-project"><span>▾</span><strong id="directory-project-name"></strong></div><div id="project-tree" class="project-tree"></div><div id="item-list" hidden></div><div id="sidebar-context" hidden></div>
+      <details id="frame-folder" class="frame-folder" open><summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 7V5h7l2 2h9v13H3z"/></svg><span>单帧资源</span><small id="directory-frame-count"></small></summary>
+      <div class="library-heading"><h2>单帧 <span id="asset-count">0</span></h2><button id="import-processed" class="text-button">导入</button></div>
       <div class="library-kind"><label>资源类型<select id="asset-kind" aria-label="筛选资源类型"><option value="">全部资源</option><option value="sprite">单帧</option><option value="action">动作</option><option value="sequence">序列</option></select></label></div><div class="library-filters"><input id="asset-search" type="search" placeholder="搜索素材…" aria-label="搜索素材"><select id="asset-source" aria-label="筛选素材来源"><option value="">全部来源</option></select></div>
       <div class="library-selection"><label><input id="asset-multiselect" type="checkbox"> 多选</label><button id="assets-select-visible" class="text-button">全选当前结果</button><button id="assets-clear" class="text-button">清空</button></div>
       <div id="asset-selection-actions" class="selection-actions" hidden><span id="asset-selection-count">已选 0 项</span><button id="assets-add" class="text-button">加入动作</button><button id="assets-delete" class="text-button danger">删除</button></div>
-      <div id="asset-library" class="asset-library"></div>
+      <div id="asset-library" class="asset-library"></div></details>
       <div class="sidebar-footer"><button id="prepare" title="只生成缺失的 processed 素材，不覆盖现有图片">准备缺失素材</button><button id="migrate" title="将现有最终帧保留为可复用素材，并更新动作引用">保留已有最终帧</button></div>
     </aside>
 
     <div id="left-splitter" class="splitter splitter-vertical" role="separator" tabindex="0" aria-label="调整素材区宽度" aria-orientation="vertical" aria-controls="materials-pane"></div>
     <section id="canvas-pane" class="editor" tabindex="-1">
+  <div id="workflow-status" class="workflow-status" role="status" aria-live="polite" aria-atomic="true">
+    <span id="draft-state" data-state="quiet">工程：载入中</span>
+    <span id="preview-state" data-state="quiet">处理预览：未选择原图</span>
+    <span id="material-state" data-state="quiet">素材：载入中</span>
+    <span id="activity-state" data-state="busy" hidden></span>
+  </div>
       <div id="reference-board" class="reference-board" hidden></div>
       <div id="resource-navigation" class="resource-navigation" hidden><button id="resource-back" class="text-button">← 返回父组合</button><span id="resource-navigation-label"></span></div>
       <div id="action-navigation" class="action-navigation" hidden><button id="action-edit">动作编排</button><button id="action-review">衔接检查</button></div>
