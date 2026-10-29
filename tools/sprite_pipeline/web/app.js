@@ -641,11 +641,21 @@ function renderInspector() {
 function actionInspector() { return composition.inspector(); }
 function bindValue(id, operation, options = {}) {
   const input = $('#' + id); if (!input) return;
-  input.addEventListener('change', () => {
-    if (input.type === 'number' && !input.checkValidity()) { input.reportValidity(); return; }
-    const value = input.type === 'checkbox' ? input.checked : input.type === 'number' ? (input.value === '' ? null : Number(input.value)) : input.value;
-    change(() => operation(value),options);
-  });
+  const {live=false,...changeOptions}=options;
+  const read=()=>input.type === 'checkbox' ? input.checked : input.type === 'number' ? (input.value === '' ? null : Number(input.value)) : input.value;
+  let previous=read();
+  const update=event=>{
+    if (input.type === 'number' && !input.checkValidity()) {
+      if (event.type === 'change') input.reportValidity();
+      return;
+    }
+    const value=read();
+    if (live && Object.is(value,previous)) return; // Blur must not submit the last input twice.
+    change(() => operation(value),live ? {...changeOptions,render:false} : changeOptions);
+    previous=value;
+  };
+  input.addEventListener('change',update);
+  if (live) input.addEventListener('input',update);
 }
 function bindActionInspector() { composition.bindInspector(); }
 function resolvedSource() {
@@ -702,7 +712,7 @@ function sourceInspector() {
   const override = process.overrides?.[slice?.id] || {};
   const material=sourceMaterialStatus(sourceInfo(),state.data,state.savedData);
   const frameCopy=(override.mode || process.mode || 'anchor') === 'copy', groupCopy=process.mode === 'copy';
-  const error = (state.previewError ? `<div class="error-panel">${escape(state.previewError)}</div>` : '') + section('素材状态',info('当前原图组',material.label)+'<p class="hint">'+escape(material.reason)+'</p>');
+  const error = `<div id="source-preview-error" class="error-panel" role="alert" ${state.previewError ? '' : 'hidden'}>${escape(state.previewError || '')}</div>` + section('素材状态',info('当前原图组',material.label)+'<p class="hint">'+escape(material.reason)+'</p>');
   if (state.sourceView === 'processed' && slice && sourceForFrame(state.sources,slice.ref)?.file !== state.source)
     return error + section('只读素材',info('引用',slice.ref) + '<p class="hint">此帧没有可直接调整的原图切片。可以播放对照，选择有原图的帧后再调整。</p>');
   if (state.sourceView === 'original') {
@@ -780,7 +790,8 @@ function bindSourceInspector() {
     }
     setProcess('mode',value);
   },opts);
-  [['process-scale','scale'],['process-scale-x','scale_x'],['process-height','fit_height'],['process-max-scale','max_scale'],['process-clamp','clamp_y'],['process-padding','padding'],['process-overflow','overflow']].forEach(([id,key]) => bindValue(id,value => setProcess(key,value),opts));
+  [['process-scale','scale'],['process-height','fit_height'],['process-max-scale','max_scale'],['process-clamp','clamp_y'],['process-padding','padding'],['process-overflow','overflow']].forEach(([id,key]) => bindValue(id,value => setProcess(key,value),opts));
+  bindValue('process-scale-x',value => setProcess('scale_x',value),{...opts,live:true});
   ['x','y'].forEach((axis,index) => bindValue('process-' + axis,value => { const offset = [...(resolvedSource().process.offset || [0,0])]; offset[index] = value; setProcess('offset',offset); },opts));
   const setOverride = (key,value) => {
     const id = selectedSlice()?.id; if (!id) return;
@@ -792,7 +803,7 @@ function bindSourceInspector() {
     const offset = [...(process.overrides?.[id]?.offset || process.offset || [0,0])]; offset[index] = value; setOverride('offset',offset);
   },opts));
   bindValue('override-scale',value => setOverride('scale',value),opts);
-  bindValue('override-scale-x',value => setOverride('scale_x',value),opts);
+  bindValue('override-scale-x',value => setOverride('scale_x',value),{...opts,live:true});
   $('#clear-override')?.addEventListener('click', () => change(() => {
     const overrides = clone(resolvedSource().process.overrides || {}); delete overrides[selectedSlice().id]; setProcess('overrides',overrides);
   },opts));
@@ -828,9 +839,16 @@ function patchAdjustmentTimeline() {
     card.classList.toggle('selected',i === state.selected);
   });
 }
+function editingInspectorField() {
+  return ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) && $('#inspector-content').contains?.(document.activeElement);
+}
+function refreshPreviewError() {
+  const error=$('#source-preview-error');
+  if (error) { error.textContent=state.previewError || ''; error.hidden=!state.previewError; }
+}
 function refreshAdjustment() {
-  const editingField = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) && $('#inspector-content').contains?.(document.activeElement);
-  if (!editingField) renderInspector();
+  if (!editingInspectorField()) renderInspector();
+  refreshPreviewError();
   patchAdjustmentTimeline(); refreshPlayer({seek:false}); updateSaveStatus();
 }
 function showPreview(result, source, key) {
@@ -886,7 +904,10 @@ async function previewSource(force = false) {
     if (error.name === 'AbortError' || epoch !== state.previewEpoch) return;
     state.previewError=error.message;
     if (state.sourceView === 'processed') { player.pause(); $('#play').disabled=true; $('#play').textContent='▶'; }
-    if (state.mode === 'source') { renderInspector(); updateSaveStatus(); }
+    if (state.mode === 'source') {
+      if (!editingInspectorField()) renderInspector();
+      refreshPreviewError(); updateSaveStatus();
+    }
     $('#status-message').textContent='预览失败：'+error.message;
     if (previewRequest?.key === key) previewRequest=null;
   }
