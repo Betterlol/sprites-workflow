@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from sprite_pipeline.domain.resources import sprite_users, validate_resources
 from sprite_pipeline.storage.files import write_json
 
 OUTPUT_DIRS = ("source_sprites", "processed_sprites", "sprites", "spritesheets", "webp", "metadata")
@@ -304,13 +305,18 @@ def config_from_data(data: dict, path: Path, output_root: Path | None = None) ->
         if not isinstance(spec.get("loop", False), bool):
             raise ValueError(f"{name}.loop must be boolean")
         integer(spec.get("pack", {}).get("columns", 4), f"{name}.pack.columns", 1)
-        selection = spec.get("sprites")
+        if "slots" in spec and spec.get("sprites"):
+            raise ValueError(f"{name}: use slots or sprites, not both")
+        selection = spec.get("sprites") if "slots" not in spec else None
         if selection is not None:
             if not isinstance(selection, list) or not selection:
                 raise ValueError(f"{name}.sprites must be a nonempty ordered list")
             for ref in selection:
                 if inside(cfg.directory("processed_sprites"), ref).suffix.lower() != ".png":
                     raise ValueError(f"{name}.sprites entries must reference PNG files")
+    validate_resources(cfg.data)
+    for reference in sprite_users(cfg.data):
+        inside(cfg.directory("processed_sprites"), reference)
     return cfg
 
 

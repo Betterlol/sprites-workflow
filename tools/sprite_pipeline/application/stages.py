@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from sprite_pipeline.domain.actions import action_steps
 from sprite_pipeline.domain.models import CanvasSpec
 from sprite_pipeline.imaging.extraction import cut_frames
 from sprite_pipeline.imaging.processing import process_frames
@@ -87,7 +88,7 @@ def process_source(cfg: Config, filename: str) -> int:
 
 
 def select_action(cfg: Config, name: str) -> int:
-    selection = cfg.action(name).get("sprites")
+    selection = [step["ref"] for step in action_steps(cfg, name)]
     if not selection:
         raise ValueError(
             f"{name}: configure sprites as an ordered list of processed PNG paths before selecting"

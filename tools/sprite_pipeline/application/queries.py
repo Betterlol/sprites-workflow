@@ -8,6 +8,7 @@ from PIL import Image
 
 from sprite_pipeline.application.contracts import QueryContext
 from sprite_pipeline.application.presentation import image_url
+from sprite_pipeline.domain.resources import sprite_users
 from sprite_pipeline.storage.configuration import IMAGE_SUFFIXES, inside, source_fingerprint
 
 REFERENCE_DIRS = ("references", "reference")
@@ -91,12 +92,7 @@ def project_state(session: QueryContext) -> dict:
         if missing:
             warnings.append("原图缺失，请恢复图片或移除对应规则：" + ", ".join(sorted(missing)))
         references = {a["ref"] for a in assets}
-        missing_refs = {
-            ref
-            for name in cfg.data["actions"]
-            for ref in cfg.action(name).get("sprites") or []
-            if ref not in references
-        }
+        missing_refs = set(sprite_users(cfg.data)) - references
         if missing_refs:
             warnings.append(f"有 {len(missing_refs)} 个动作素材引用缺失，请准备素材或调整引用。")
         return {

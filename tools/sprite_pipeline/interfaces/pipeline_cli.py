@@ -7,13 +7,13 @@ import sys
 from pathlib import Path
 
 from sprite_pipeline.application.export_formats import (
+    action_playback,
     final_frames,
     pack_action,
     preview_action,
     update_manifest,
 )
 from sprite_pipeline.application.stages import extract_source, process_source, select_action
-from sprite_pipeline.domain.animation import playback
 from sprite_pipeline.storage.configuration import load_config
 from sprite_pipeline.storage.locking import project_lock
 
@@ -97,7 +97,7 @@ def execute(args) -> int:
             if stage in {"pack", "preview"} and not args.no_preview:
                 for name in actions:
                     paths, _ = final_frames(cfg, name)
-                    playback(cfg.action(name), len(paths))
+                    action_playback(cfg, name, len(paths))
             for name in sources if stage in {"extract", "process"} else actions:
                 if stage == "extract":
                     count = extract_source(cfg, name)

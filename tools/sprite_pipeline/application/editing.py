@@ -11,6 +11,7 @@ from sprite_pipeline.application.session import ProjectSession
 from sprite_pipeline.domain.actions import validate_editor
 from sprite_pipeline.domain.errors import OperationCancelled
 from sprite_pipeline.domain.models import Cancellation, Progress
+from sprite_pipeline.domain.resources import sprite_users
 from sprite_pipeline.storage.configuration import inside, source_fingerprint
 from sprite_pipeline.storage.files import frame_changes, replace_frames
 from sprite_pipeline.storage.identities import previous_slices
@@ -56,8 +57,7 @@ class EditingOperations:
             available = {prefix + item["file"] for item in descriptors}
             broken = {
                 ref
-                for name in current.data["actions"]
-                for ref in (current.action(name).get("sprites") or [])
+                for ref in sprite_users(current.data)
                 if ref.startswith(prefix) and ref not in available
             }
             if broken:
@@ -152,8 +152,7 @@ class EditingOperations:
             available = {prefix + name for name in frames}
             broken = {
                 ref
-                for name in cfg.data["actions"]
-                for ref in (cfg.action(name).get("sprites") or [])
+                for ref in sprite_users(cfg.data)
                 if ref.startswith(prefix) and ref not in available
             }
             if broken:

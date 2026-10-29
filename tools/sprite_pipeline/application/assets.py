@@ -12,7 +12,8 @@ from tempfile import TemporaryDirectory
 from PIL import Image
 
 from sprite_pipeline.application.session import ProjectSession
-from sprite_pipeline.domain.actions import validate_editor
+from sprite_pipeline.domain.actions import action_steps, validate_editor
+from sprite_pipeline.domain.resources import sprite_users
 from sprite_pipeline.imaging.png import png_bytes
 from sprite_pipeline.storage.configuration import IMAGE_SUFFIXES, inside
 from sprite_pipeline.storage.files import numbered_frames, read_image, write_json
@@ -36,7 +37,11 @@ class AssetOperations:
                     final = numbered_frames(cfg.directory("sprites") / name, name)
                 except FileNotFoundError:
                     continue
-                refs = cfg.action(name).get("sprites") or []
+                refs = (
+                    [step["ref"] for step in action_steps(cfg, name)]
+                    if (cfg.action(name).get("sprites") or cfg.action(name).get("slots"))
+                    else []
+                )
                 references = []
                 for index, path in enumerate(final):
                     image = read_image(path)
@@ -60,6 +65,7 @@ class AssetOperations:
                         copies.append((path, inside(cfg.directory("processed_sprites"), reference)))
                         references.append(reference)
                         changed += 1
+                cfg.data["actions"][name].pop("slots", None)
                 cfg.data["actions"][name]["sprites"] = references
             validate_editor(cfg)
             self.session.check_revision(revision)
@@ -235,8 +241,8 @@ class AssetOperations:
                 raise ValueError("Unknown deletion category")
             uses = {
                 name
-                for name in cfg.data["actions"]
-                for ref in cfg.action(name).get("sprites") or []
+                for ref, owners in sprite_users(cfg.data).items()
+                for name in owners
                 if ref in blocked_refs or any(ref.startswith(prefix) for prefix in prefixes)
             }
             if uses:

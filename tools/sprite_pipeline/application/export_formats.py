@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 
 from PIL import Image
 
+from sprite_pipeline.domain.actions import action_steps
 from sprite_pipeline.domain.animation import playback
 from sprite_pipeline.imaging.gif import encode_gif
 from sprite_pipeline.storage.atlas import TexturePackerFrame, write_texturepacker_hash
@@ -25,9 +26,21 @@ def final_frames(cfg: Config, name: str) -> tuple[list[Path], list[Image.Image]]
     return paths, images
 
 
+def action_playback(cfg: Config, name: str, count: int) -> tuple[list[int], list[int], int]:
+    spec = cfg.action(name)
+    if "slots" not in spec:
+        return playback(spec, count)
+    runtime = action_steps(cfg, name)
+    if len(runtime) != count:
+        raise ValueError(f"{name}: final PNG count differs from composed runtime; run select")
+    steps = action_steps(cfg, name, "display")
+    loop = spec.get("animation", {}).get("loop", 0 if spec.get("loop", False) else 1)
+    return [step["frame"] for step in steps], [step["duration_ms"] for step in steps], loop
+
+
 def preview_action(cfg: Config, name: str) -> dict:
     paths, images = final_frames(cfg, name)
-    order, durations, loop = playback(cfg.action(name), len(images))
+    order, durations, loop = action_playback(cfg, name, len(images))
     output = cfg.directory("webp") / f"{cfg.character}_{name}.webp"
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".sprite-preview-", dir=output.parent) as temporary:
@@ -60,7 +73,7 @@ def preview_action(cfg: Config, name: str) -> dict:
 
 def preview_gif(cfg: Config, name: str) -> dict:
     paths, images = final_frames(cfg, name)
-    order, durations, loop = playback(cfg.action(name), len(images))
+    order, durations, loop = action_playback(cfg, name, len(images))
     output = cfg.directory("gif") / f"{cfg.character}_{name}.gif"
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".sprite-gif-", dir=output.parent) as temporary:
@@ -90,15 +103,19 @@ def pack_action(cfg: Config, name: str) -> dict:
     rows = (len(images) + columns - 1) // columns
     sheet = Image.new("RGBA", (columns * width, rows * height), (0, 0, 0, 0))
     atlas_frames, tp_frames = {}, []
+    runtime = action_steps(cfg, name) if "slots" in spec else None
+    if runtime is not None and len(runtime) != len(images):
+        raise ValueError(f"{name}: final PNG count differs from composed runtime; run select")
     duration = round(1000 / spec.get("fps", 12))
     for index, (path, image) in enumerate(zip(paths, images)):
+        frame_duration = runtime[index]["duration_ms"] if runtime is not None else duration
         x, y = index % columns * width, index // columns * height
         sheet.alpha_composite(image, (x, y))
         atlas_frames[path.name] = {
             "frame": {"x": x, "y": y, "w": width, "h": height},
             "anchor": cfg.anchor,
         }
-        tp_frames.append(TexturePackerFrame(path.name, x, y, width, height, duration))
+        tp_frames.append(TexturePackerFrame(path.name, x, y, width, height, frame_duration))
     output = cfg.directory("spritesheets") / f"{cfg.character}_{name}.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".sprite-atlas-", dir=output.parent) as temporary:
@@ -123,8 +140,11 @@ def pack_action(cfg: Config, name: str) -> dict:
         "fps": spec.get("fps", 12),
         "loop": spec.get("loop", False),
         "frames": [
-            {"filename": path.relative_to(cfg.root).as_posix(), "duration_ms": duration}
-            for path in paths
+            {
+                "filename": path.relative_to(cfg.root).as_posix(),
+                "duration_ms": runtime[index]["duration_ms"] if runtime is not None else duration,
+            }
+            for index, path in enumerate(paths)
         ],
         "atlas_frames": atlas_frames,
     }

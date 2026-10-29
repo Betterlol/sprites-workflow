@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from sprite_pipeline.application.export_formats import action_playback
 from sprite_pipeline.domain.actions import action_steps
-from sprite_pipeline.domain.animation import playback
 from sprite_pipeline.storage.configuration import Config, config_from_data, inside
 
 
@@ -451,7 +451,7 @@ def check_export(
                         except (OSError, ValueError, TypeError, AttributeError) as error:
                             _issue(issues, sheet_name, f"Cannot inspect atlas: {error}")
                 if present["webp"] or present["gif"]:
-                    order, durations, loop = playback(embedded.action(action), len(runtime))
+                    order, durations, loop = action_playback(embedded, action, len(runtime))
                     ordered = [sprites[index][1] for index in order]
                     for prefix in ("webp", "gif"):
                         if present[prefix]:
@@ -501,7 +501,7 @@ def check_export(
                             entry = matching[0]
                             spec = embedded.action(action)
                             if (
-                                entry.get("count") != len(spec["sprites"])
+                                entry.get("count") != len(action_steps(embedded, action))
                                 or entry.get("fps") != spec.get("fps", 12)
                                 or entry.get("loop") != spec.get("loop", False)
                                 or entry.get("sheet") != f"spritesheets/{character}_{action}.png"
