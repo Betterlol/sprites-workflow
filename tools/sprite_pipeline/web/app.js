@@ -1,3 +1,4 @@
+import {createExportDisplay} from './export-display.js';
 import {createExplorer} from './explorer.js';
 import {clone, actionSteps, reviewSteps, defaultReviews, merge, roundMs} from './model.js';
 import {createCompositionUI} from './composition.js';
@@ -33,6 +34,7 @@ state.adjustPlaybackMode = 'runtime';
 const player = new Player($('#stage'), $('#canvas-area'), onStep);
 const composition = createCompositionUI({state,$,escape,player,asset,change,renderAll,renderInspector,showPane,mode,steps:activeSteps,onStep,sourceForFrame,deleteMaterials,deleteSequence,renameResource,toast,updateSaveStatus,confirm:message=>confirm(message)});
 const explorer = createExplorer({state,$,escape,composition,mode});
+const exportDisplay = createExportDisplay({$,state,change,toast,escape});
 const LAYOUT_KEY = 'sprite-workbench-layout';
 let storedLayout = {};
 try { storedLayout = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {}; } catch {}
@@ -417,6 +419,7 @@ function mode(value, sourceView = 'processed') {
     state.preview = null; state.previewKey = null; state.previewError = null;
   }
   if (value === 'source') state.sourceView = sourceView;
+  state.playbackMode='runtime'; state.adjustPlaybackMode='runtime';
   state.mode = value; state.selected = 0; state.slot = 0; state.clip = 0; player.pause();
   if (value === 'source' && sourceView === 'processed') chooseAdjustmentAction();
   clearTimeout(previewTimer); state.previewEpoch++; cancelRegionDrag(false);
@@ -431,12 +434,7 @@ function renderAll() {
   if (!state.data.actions[state.action]) state.action = actionNames[0];
   if (!state.data.actions[state.adjustAction]) state.adjustAction = '';
   if (!reviews()[state.review]) state.review = Object.keys(reviews())[0];
-  $('#adjust-playback').onchange=()=>{
-  player.pause(); state.adjustPlaybackMode=$('#adjust-playback').value; selectAdjustmentStep(0);
-  state.previewEpoch++; renderAll(); schedulePreview();
-};
-
-document.querySelectorAll('button[data-mode]').forEach(button => {
+  document.querySelectorAll('button[data-mode]').forEach(button => {
     const active = (button.dataset.mode === state.mode || button.dataset.mode === 'action' && state.mode === 'review') && (!button.dataset.view || button.dataset.view === state.sourceView);
     button.classList.toggle('active', active); button.setAttribute('aria-selected', active);
   });
@@ -466,7 +464,7 @@ function renderWorkflow() {
   $('#slice-tools').hidden = !slicing;
   $('#adjustment-context').hidden = state.mode !== 'source' || slicing;
   $('#adjust-action').innerHTML = '<option value="">素材检查（非动作编排）</option>' + Object.keys(state.data.actions).map(name=>`<option value="${escape(name)}" ${name === state.adjustAction ? 'selected' : ''}>${escape(name)}</option>`).join('');
-  $('#adjust-playback').value = state.adjustPlaybackMode;
+
   $('#adjust-context-note').textContent = state.adjustAction ? '按动作完整顺序播放 · 重复素材同步更新' : `原帧顺序 · ${state.data.defaults?.fps || 12} FPS`;
   if (state.mode === 'source' && !slicing) $('#timeline-title').textContent = state.adjustAction ? `${state.adjustAction} · ${state.adjustPlaybackMode === 'runtime' ? '游戏播放' : '展示播放'}` : '素材检查 · 非动作编排';
   $('#slice-select').classList.toggle('active',sliceTool === 'select');
@@ -501,7 +499,7 @@ function activeSteps() {
     if (state.sourceView === 'processed') {
       const available = adjustmentFrames();
       const order = state.adjustAction && state.data.actions[state.adjustAction]
-        ? actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode)
+        ? actionSteps(state.data,state.adjustAction,'runtime')
         : (state.preview?.stage === 'process' && state.previewSource === state.source ? state.preview.frames : state.assets.filter(frame=>sourceForFrame(state.sources,frame.ref)?.file === state.source))
           .map((frame,index)=>({ref:frame.ref,frame:index,duration_ms:Math.max(1,roundMs(1000/(state.data.defaults?.fps || 12)))}));
       const offsets = Object.fromEntries(Object.entries(state.previewOffsets).map(([id,value])=>[state.source?.replace(/\.[^.]+$/,'')+'/'+id+'.png',value]));
@@ -513,7 +511,7 @@ function activeSteps() {
     const prefix = state.source ? state.source.replace(/\.[^.]+$/, '') + '/' : '';
     return state.assets.filter(a => prefix && a.ref.startsWith(prefix)).map((a, i) => ({...a, frame:i, id:a.ref.split('/').pop().replace('.png',''),duration_ms:100}));
   }
-  if (state.mode === 'action') return state.action ? actionSteps(state.data, state.action, state.playbackMode) : [];
+  if (state.mode === 'action') return state.action ? actionSteps(state.data, state.action, 'runtime') : [];
   return currentReview() ? reviewSteps(state.data, currentReview()) : [];
 }
 function chooseAdjustmentAction() {
@@ -521,7 +519,7 @@ function chooseAdjustmentAction() {
   state.adjustAction = names.includes(state.adjustAction) ? state.adjustAction : names.includes(state.action) ? state.action : names[0] || '';
   if (!state.source && state.data.actions[state.action]) state.adjustAction = state.action;
   if (state.adjustAction) $('#loop-preview').checked = !!merge(state.data.defaults,state.data.actions[state.adjustAction]).loop;
-  if (state.adjustAction) state.selected = Math.max(0,actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode).findIndex(step=>sourceForFrame(state.sources,step.ref)?.file === state.source));
+  if (state.adjustAction) state.selected = Math.max(0,actionSteps(state.data,state.adjustAction,'runtime').findIndex(step=>sourceForFrame(state.sources,step.ref)?.file === state.source));
 }
 function adjustmentFrames() {
   const result=[];
@@ -814,7 +812,7 @@ function showPreview(result, source, key) {
 }
 async function prepareActionPreviews(epoch) {
   if (!state.adjustAction || !state.data.actions[state.adjustAction] || state.sourceView !== 'processed') return;
-  const sources=[...new Set(actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode).map(step=>sourceForFrame(state.sources,step.ref)?.file).filter(Boolean))];
+  const sources=[...new Set(actionSteps(state.data,state.adjustAction,'runtime').map(step=>sourceForFrame(state.sources,step.ref)?.file).filter(Boolean))];
   for (const source of sources) {
     if (epoch !== state.previewEpoch || state.mode !== 'source') return;
     const key=previewKey(source,'processed'), previous=processedPreviews.get(source)?.result;
@@ -1015,7 +1013,7 @@ $('#slice-select').onclick=()=>{ cancelRegionDrag(); sliceTool='select'; renderA
 $('#slice-create').onclick=()=>{ cancelRegionDrag(); sliceTool='create'; renderAll(); };
 $('#adjust-action').onchange=()=>{
   player.pause(); state.adjustAction=$('#adjust-action').value; state.selected=0;
-  const first = state.adjustAction ? actionSteps(state.data,state.adjustAction,state.adjustPlaybackMode)[0] : null;
+  const first = state.adjustAction ? actionSteps(state.data,state.adjustAction,'runtime')[0] : null;
   const owner=sourceForFrame(state.sources,first?.ref);
   if (owner && owner.file !== state.source) { state.source=owner.file; state.preview=null; state.previewKey=null; state.previewOffsets={}; }
   if (state.adjustAction) $('#loop-preview').checked=!!merge(state.data.defaults,state.data.actions[state.adjustAction]).loop;
@@ -1218,6 +1216,7 @@ function openExport() {
   $('#export-format').value = state.mode === 'review' ? 'review' : 'all'; updateExportFormat(); $('#export-dialog').showModal();
 }
 function updateExportFormat() {
+  exportDisplay.render();
   const format = $('#export-format').value;
   $('#export-actions').hidden = ['project','review'].includes(format);
   $('#export-note').textContent = format === 'review' ? '导出当前 Review 的 WebP、GIF 和逐步记录，使用所选片段范围与播放模式。' :
@@ -1238,11 +1237,12 @@ $('#export-cancel').onclick = async () => {
 $('#export-form').onsubmit = async event => {
   event.preventDefault(); if (exportJobId) return;
   const format = $('#export-format').value;
+  if (!$('#export-display-settings').hidden && !exportDisplay.apply()) return;
   const actions = [...$('#export-action-list').querySelectorAll('input:checked')].map(input => input.value);
   if (!['project','review'].includes(format) && !actions.length) { toast('请至少选择一个动作',true); return; }
   if (format === 'review' && !reviewSteps(state.data,currentReview()).length) { toast('请先创建序列并添加资源槽位',true); return; }
   const submit = $('#export-submit'); submit.disabled = true; submit.textContent = '正在生成…';
-  $('#export-close').disabled = true; $('#export-format').disabled = true;
+  $('#export-close').disabled = true; $('#export-format').disabled = true; $('#export-display-settings').disabled=true;
   $('#export-progress-box').hidden = false; $('#export-cancel').disabled = false;
   $('#export-progress').textContent = '正在准备导出…';
   try {
@@ -1266,7 +1266,7 @@ $('#export-form').onsubmit = async event => {
   } catch (error) { toast(error.message,true); }
   finally {
     exportJobId = null; submit.disabled = false; submit.textContent = '生成并下载 ZIP ↗';
-    $('#export-close').disabled = false; $('#export-format').disabled = false;
+    $('#export-close').disabled = false; $('#export-format').disabled = false; $('#export-display-settings').disabled=false;
     $('#export-progress-box').hidden = true; $('#export-progress-bar').value = 0;
   }
 };

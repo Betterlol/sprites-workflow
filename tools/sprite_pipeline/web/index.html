@@ -76,7 +76,7 @@
       <div id="resource-navigation" class="resource-navigation" hidden><button id="resource-back" class="text-button">← 返回父组合</button><span id="resource-navigation-label"></span></div>
       <div id="action-navigation" class="action-navigation" hidden><button id="action-edit">动作编排</button><button id="action-review">衔接检查</button></div>
       <div id="slice-tools" class="slice-tools" hidden><button id="slice-select" class="active" title="选中区域后可直接移动，拖动边角调整大小">选择 / 移动</button><button id="slice-create" title="在原图上拖拽创建新区域">＋ 新建区域</button><span>拖动边角缩放 · Shift + 方向键移动 10 px</span></div>
-      <div id="adjustment-context" class="adjustment-context" hidden><label>预览动作 <select id="adjust-action" aria-label="调整预览动作"></select></label><select id="adjust-playback" aria-label="调整播放方式"><option value="runtime">游戏播放</option><option value="display">展示播放</option></select><span id="adjust-context-note"></span></div>
+      <div id="adjustment-context" class="adjustment-context" hidden><label>预览动作 <select id="adjust-action" aria-label="调整预览动作"></select></label><span id="adjust-context-note"></span></div>
       <div class="canvas-toolbar"><div><span class="eyebrow" id="editor-kind">ACTION EDITOR</span><strong id="editor-title">—</strong></div><div class="view-controls"><label><input id="guides" type="checkbox" checked> 辅助线</label><label><input id="onion" type="checkbox"> 前帧叠图</label><label><input id="reference" type="checkbox"> Idle 参考</label><select id="background" aria-label="画布背景"><option value="checker">棋盘格</option><option value="dark">深色</option><option value="light">浅色</option></select><select id="zoom" aria-label="画布缩放"><option value="fit">适应画布</option><option value="1">100%</option><option value="0.5">50%</option><option value="2">200%</option></select></div></div>
       <div id="canvas-area" class="canvas-area">
         <span class="canvas-label" id="canvas-label">统一画布 · 固定锚点</span>
@@ -133,7 +133,13 @@
       <p class="muted">根据当前草稿生成。不会覆盖工程中的已有导出文件。</p>
       <label class="field">导出格式<select id="export-format"><option value="all">完整动作资源 · 帧 + 图集 + WebP + GIF</option><option value="frames">PNG 帧序列 ZIP</option><option value="atlas">PNG 图集 + TexturePacker JSON</option><option value="webp">展示动画 WebP</option><option value="gif">展示动画 GIF</option><option value="review">当前 Review · WebP + GIF + 播放记录</option><option value="project">完整工程 · 原图 + processed + 配置</option></select></label>
       <fieldset id="export-actions"><legend>选择动作</legend><div id="export-action-list"></div></fieldset>
-      <p id="export-note" class="hint">图集使用游戏帧顺序；WebP 使用独立的展示播放配置。</p>
+      <fieldset id="export-display-settings"><legend>展示播放设置</legend>
+      <label class="field">动作<select id="export-display-action"></select></label>
+      <div class="field-row"><label class="field">展示 FPS<input id="export-display-fps" type="number" min="0.01" step="any" placeholder="继承动作时长"></label><label class="field">循环次数<input id="export-display-loop" type="number" min="0" max="65535" placeholder="继承动作循环"></label></div>
+      <details><summary>顺序与逐帧时长</summary><label class="field">播放顺序（0 起，逗号分隔）<input id="export-display-order" placeholder="留空使用游戏帧顺序"></label><label class="field">每步时长 ms（逗号分隔）<input id="export-display-durations" placeholder="数量需与播放顺序一致"></label><label class="field">统一停留 ms<input id="export-display-hold" type="number" min="1" max="16777215" placeholder="继承动作时长"></label></details>
+      <p class="hint">仅用于 WebP / GIF 展示动画；日常调整始终预览游戏播放。逐步时长优先于统一停留和 FPS。</p>
+      <div class="field-row"><button id="export-display-apply" type="button">应用到工程草稿</button><button id="export-display-reset" type="button">恢复游戏播放</button></div>
+      </fieldset><p id="export-note" class="hint">图集使用游戏帧顺序；WebP 使用独立的展示播放配置。</p>
       <div id="export-progress-box" class="export-progress" hidden><p id="export-progress" role="status">准备导出…</p><progress id="export-progress-bar" value="0" max="1"></progress><button id="export-cancel" type="button">取消生成</button></div>
       <button type="submit" class="primary wide" id="export-submit">生成并下载 ZIP ↗</button>
     </form>

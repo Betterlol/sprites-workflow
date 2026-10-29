@@ -179,7 +179,7 @@ export function createCompositionUI(api) {
     html+=section('播放设置',(action ? label('单帧默认 FPS',number('composition-fps',merged.fps || 12,'min="1" max="1000" step="0.5"'))+
       label('图集列数',number('composition-columns',merged.pack?.columns || 4,'min="1" max="64"')) : '')+
       `<label class="field-inline">循环播放<input id="composition-loop" type="checkbox" ${merged.loop ? 'checked' : ''}></label>`+
-      (action ? `<div class="mode-switch"><button id="composition-runtime" class="${state.playbackMode === 'runtime' ? 'active' : ''}">游戏播放</button><button id="composition-display" class="${state.playbackMode === 'display' ? 'active' : ''}">展示播放</button></div>` : label('引用默认播放',`<select id="composition-mode"><option value="runtime" ${spec.mode !== 'display' ? 'selected' : ''}>游戏播放</option><option value="display" ${spec.mode === 'display' ? 'selected' : ''}>展示播放</option></select>`))+
+      (action ? '' : '<details><summary>高级引用设置</summary>'+label('引用默认播放',`<select id="composition-mode"><option value="runtime" ${spec.mode !== 'display' ? 'selected' : ''}>游戏播放</option><option value="display" ${spec.mode === 'display' ? 'selected' : ''}>展示播放</option></select>`)+'</details>')+
       '<p class="hint">单帧使用默认 FPS。引用片段保留自身时长；每个槽位可单独调速、截取和重复。子资源的无限循环只展开一遍。</p>');
     if (slot) {
       const target=slot.resource;
@@ -187,17 +187,11 @@ export function createCompositionUI(api) {
       html+=section(`槽位 ${selected()+1}`,label('引用资源',`<select id="slot-resource">${options.map(item=>`<option value="${escape(resourceKey(item.resource))}" ${resourceKey(item.resource) === resourceKey(target) ? 'selected' : ''}>${resourceLabel(item.kind)} · ${escape(item.name)}</option>`).join('')}</select>`)+
         `<div class="field-row">${label('重复次数',number('slot-repeat',slot.repeat ?? 1,'min="1" max="100"'))}${label('播放速度',number('slot-speed',slot.speed ?? 1,'min="0.01" max="100" step="0.05"'))}</div>`+
         (target.kind === 'sprite' ? label('单帧停留 ms',number('slot-duration',slot.duration_ms,'min="1" max="16777215" placeholder="继承默认 FPS"')) :
-          label('引用播放',`<select id="slot-mode"><option value="" ${!slot.mode ? 'selected' : ''}>继承当前资源默认</option><option value="runtime" ${slot.mode === 'runtime' ? 'selected' : ''}>游戏播放</option><option value="display" ${slot.mode === 'display' ? 'selected' : ''}>展示播放</option></select>`))+
+          '<details><summary>高级引用设置</summary>'+label('引用播放',`<select id="slot-mode"><option value="" ${!slot.mode ? 'selected' : ''}>继承当前资源默认</option><option value="runtime" ${slot.mode === 'runtime' ? 'selected' : ''}>游戏播放</option><option value="display" ${slot.mode === 'display' ? 'selected' : ''}>展示播放</option></select>`)+'</details>')+
         `<div class="field-row">${label('起始步（0 起）',number('slot-start',slot.start ?? 0,'min="0"'))}${label('结束步（含）',number('slot-end',slot.end,'min="0" placeholder="最后一步"'))}</div>`+
         '<p class="hint">范围作用于所选引用播放方式展开后的帧。这里的调整仅影响本次引用。</p>'+
         `<button id="slot-open" class="wide">${target.kind === 'sprite' ? '定位到原图调整' : '编辑原资源'}</button><button id="slot-remove" class="wide danger">移除此槽位</button>`);
     }
-    if (action && state.playbackMode === 'display' && step) html+=section('所选展开帧',`<span class="selected-ref">${escape(step.ref)}</span>`+
-      label('展示停留 ms',number('composition-frame-duration',step.duration_ms,'min="1" max="16777215"'))+
-      '<p class="hint">展开槽位后点击具体帧，可调整该次展示的停留时间。已有展示顺序会随槽位来源保留。</p>');
-    if (action && state.playbackMode === 'display') html+=section('展示配置',
-      label('展示循环次数',number('composition-display-loop',spec.animation?.loop ?? (merged.loop ? 0 : 1),'min="0" max="65535"'))+
-      '<p class="hint">0 表示无限循环。恢复顺序后，展示播放沿用组合顺序与各片段时长。</p><button id="composition-reset-display" class="wide">展示配置恢复为组合顺序</button>');
     if (step) html+=section('当前展开帧',`<span class="selected-ref">${escape(step.ref)}</span><p class="hint">${step.duration_ms} ms</p><button id="locate-source" class="wide">定位到单帧调整</button>`);
     html+=section('引用关系',`<p class="hint">${users.length ? '此资源被 '+users.map(item=>escape(title(item))).join('、')+' 引用。修改原资源会同步到这些组合。' : '此资源可以作为素材加入其他动作或序列。'}</p>`+
       `<button id="composition-delete" class="wide danger">删除${resourceLabel(parent.kind)}</button>`);
