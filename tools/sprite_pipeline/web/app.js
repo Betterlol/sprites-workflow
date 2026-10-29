@@ -419,9 +419,9 @@ function renderAll() {
     button.classList.toggle('active', active); button.setAttribute('aria-selected', active);
   });
   $('#editor-kind').textContent = {source:'SOURCE PROCESSING',action:'ACTION EDITOR',review:'TRANSITION REVIEW',reference:'REFERENCE IMAGES'}[state.mode];
-  $('#editor-title').textContent = state.mode === 'source' ? state.source || '添加原图' : state.mode === 'action' ? state.action || '新建动作' : state.mode === 'reference' ? referenceInfo()?.file || '添加参考图' : currentReview()?.name || '新建 Review';
+  $('#editor-title').textContent = state.mode === 'source' ? state.source || '添加原图' : state.mode === 'action' ? state.action || '新建动作' : state.mode === 'reference' ? referenceInfo()?.file || '添加参考图' : currentReview()?.name || '新建预览';
   $('#sidebar-title').textContent = {source:'原图',action:'动作库',review:'Review 序列',reference:'参考图'}[state.mode];
-  $('#new-item').setAttribute('aria-label', {source:'批量导入原图',action:'新建动作',review:'新建 Review',reference:'批量导入参考图'}[state.mode]);
+  $('#new-item').setAttribute('aria-label', {source:'批量导入原图',action:'新建动作',review:'新建预览',reference:'批量导入参考图'}[state.mode]);
   $('#delete-item').hidden = false;
   $('#delete-item').textContent = {source:'删除原图',reference:'删除参考图',action:'删除动作',review:'删除序列'}[state.mode];
   $('#delete-item').setAttribute('aria-label', {source:'删除所选原图',reference:'删除所选参考图',action:'删除所选动作',review:'删除所选 Review 序列'}[state.mode]);
@@ -1011,7 +1011,7 @@ async function previewSource(force = false) {
 }
 
 function reviewInspector() {
-  const review = currentReview(); if (!review) return '<p class="hint">创建 Review，再添加动作片段。可将 jump → land、idle → attack 等衔接保存下来反复检查。</p>';
+  const review = currentReview(); if (!review) return '<p class="hint">创建预览，再添加动作片段。可将 jump → land、idle → attack 等衔接保存下来反复检查。</p>';
   const clip = review.clips[state.clip], steps = activeSteps();
   const names = Object.keys(state.data.actions);
   return section('Review 设置',label('序列名称',`<input id="review-name" value="${escape(review.name || state.review)}">`) +
@@ -1440,7 +1440,7 @@ $('#export-form').onsubmit = async event => {
   const format = $('#export-format').value;
   const actions = [...$('#export-action-list').querySelectorAll('input:checked')].map(input => input.value);
   if (!['project','review'].includes(format) && !actions.length) { toast('请至少选择一个动作',true); return; }
-  if (format === 'review' && !currentReview()?.clips.length) { toast('请先创建 Review 并添加动作片段',true); return; }
+  if (format === 'review' && !currentReview()?.clips.length) { toast('请先创建预览 并添加动作片段',true); return; }
   const submit = $('#export-submit'); submit.disabled = true; submit.textContent = '正在生成…';
   $('#export-close').disabled = true; $('#export-format').disabled = true;
   $('#export-progress-box').hidden = false; $('#export-cancel').disabled = false;
