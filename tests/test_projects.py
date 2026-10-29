@@ -678,8 +678,8 @@ class ProjectWorkflowTests(unittest.TestCase):
         config = self.root / "fish/pipeline.json"
         script = (
             "import sys; sys.path.insert(0, sys.argv[1]); from pathlib import Path; "
-            "from sprite_pipeline.locking import project_lock, ProjectBusyError\n"
-            "try:\n with project_lock(Path(sys.argv[2])): pass\n"
+            "from sprite_pipeline.locking import ProjectLock, ProjectBusyError\n"
+            "try:\n with ProjectLock(Path(sys.argv[2]), timeout=0.05): pass\n"
             "except ProjectBusyError:\n print('busy')\n"
             "else:\n raise SystemExit('writer unexpectedly acquired lock')\n"
         )
