@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sprite_pipeline.cli import main as build
 from sprite_pipeline.config import load_config
@@ -684,7 +684,7 @@ class ProjectWorkflowTests(unittest.TestCase):
             "else:\n raise SystemExit('writer unexpectedly acquired lock')\n"
         )
         with project_lock(config):
-            child = subprocess.run([sys.executable, "-c", script, str(Path(__file__).resolve().parents[1] / "tools"), str(config)],
+            child = subprocess.run([sys.executable, "-c", script, str(Path(__file__).resolve().parents[1] / "src"), str(config)],
                                    capture_output=True, text=True, timeout=20)
             self.assertEqual(child.returncode, 0, child.stderr)
             self.assertEqual(child.stdout.strip(), "busy")

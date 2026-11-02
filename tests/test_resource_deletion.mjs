@@ -1,7 +1,7 @@
 // Run manually with node tests/test_resource_deletion.mjs; not run by the agent.
 import assert from 'node:assert/strict';
-import {deletionImpact,detachForDeletion} from '../tools/sprite_pipeline/web/resource-deletion.js';
-import {resolveResource,validateComposition} from '../tools/sprite_pipeline/web/resources.js';
+import {deletionImpact,detachForDeletion} from '../src/sprite_pipeline/web/resource-deletion.js';
+import {resolveResource,validateComposition} from '../src/sprite_pipeline/web/resources.js';
 
 const original={actions:{
   leaf:{fps:10,sprites:['walk/000.png','walk/001.png','other/000.png'],animation:{order:[2,0,1,2],durations_ms:[50,60,70,80]}},

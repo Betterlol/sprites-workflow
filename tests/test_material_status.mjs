@@ -1,6 +1,6 @@
 // Added for later verification; do not run while the user is testing the app.
 import assert from 'node:assert/strict';
-import {sourceMaterialStatus,summarizeMaterials} from '../tools/sprite_pipeline/web/material-status.js';
+import {sourceMaterialStatus,summarizeMaterials} from '../src/sprite_pipeline/web/material-status.js';
 
 const saved = {
   frame_size:[16,16],anchor:{pixels:[8,16],x:.5,y:1},

@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-const html = await readFile(new URL('../tools/sprite_pipeline/web/index.html',import.meta.url),'utf8');
-const model = await import(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url));
-const resourceModel = await import(new URL('../tools/sprite_pipeline/web/resources.js',import.meta.url));
-const {createCompositionUI} = await import(new URL('../tools/sprite_pipeline/web/composition.js',import.meta.url));
-const mergeSource = await readFile(new URL('../tools/sprite_pipeline/web/merge.js',import.meta.url),'utf8');
+const html = await readFile(new URL('../src/sprite_pipeline/web/index.html',import.meta.url),'utf8');
+const model = await import(new URL('../src/sprite_pipeline/web/model.js',import.meta.url));
+const resourceModel = await import(new URL('../src/sprite_pipeline/web/resources.js',import.meta.url));
+const {createCompositionUI} = await import(new URL('../src/sprite_pipeline/web/composition.js',import.meta.url));
+const mergeSource = await readFile(new URL('../src/sprite_pipeline/web/merge.js',import.meta.url),'utf8');
 const mergeModel = await import('data:text/javascript;base64,' + Buffer.from(mergeSource).toString('base64'));
 const elements = new Map();
 class Classes {
@@ -195,13 +195,13 @@ const context = {
     return {ok:true,json:async () => structuredClone(result)};
   },
 };
-let source = await readFile(new URL('../tools/sprite_pipeline/web/app.js',import.meta.url),'utf8');
+let source = await readFile(new URL('../src/sprite_pipeline/web/app.js',import.meta.url),'utf8');
 let layoutSource;
-try { layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout.js',import.meta.url),'utf8'); } catch {}
+try { layoutSource = await readFile(new URL('../src/sprite_pipeline/web/layout.js',import.meta.url),'utf8'); } catch {}
 if (layoutSource) Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64')));
-const slicingModule = await readFile(new URL('../tools/sprite_pipeline/web/slicing.js',import.meta.url),'utf8');
+const slicingModule = await readFile(new URL('../src/sprite_pipeline/web/slicing.js',import.meta.url),'utf8');
 Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(slicingModule).toString('base64')));
-const adjustmentModule = await readFile(new URL('../tools/sprite_pipeline/web/adjustment.js',import.meta.url),'utf8');
+const adjustmentModule = await readFile(new URL('../src/sprite_pipeline/web/adjustment.js',import.meta.url),'utf8');
 Object.assign(context,await import('data:text/javascript;base64,' + Buffer.from(adjustmentModule).toString('base64')));
 source = source.replace(/^import [^\r\n]*\r?\n/gm,'');
 source += '\nglobalThis.hooks = {state,openProject,showProjects,checkExternalChanges,refreshExternal,save,saveSlices:typeof saveSlices === "function" ? saveSlices : save,dirty,player,mode,uploadFile,selectAsset,deleteMaterials,activeSteps,previewSource,restoreHistory,renderAll};';

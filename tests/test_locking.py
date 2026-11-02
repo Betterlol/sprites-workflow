@@ -11,8 +11,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-TOOLS = Path(__file__).resolve().parents[1] / "tools"
-sys.path.insert(0, str(TOOLS))
+SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC))
 
 from sprite_pipeline.storage.locking import ProjectBusyError, ProjectLock
 
@@ -48,7 +48,7 @@ class ProjectLockTests(unittest.TestCase):
             " sys.stdin.readline()\n"
         )
         child = subprocess.Popen(
-            [sys.executable, "-c", script, str(TOOLS), str(self.config)],
+            [sys.executable, "-c", script, str(SRC), str(self.config)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -13,7 +13,7 @@ from PIL import Image
 from playwright.sync_api import expect, sync_playwright
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / 'tools'))
+sys.path.insert(0, str(REPO / 'src'))
 from sprite_pipeline.application.projects import ProjectStore
 
 
@@ -43,7 +43,7 @@ def run():
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
-        server = subprocess.Popen([sys.executable, str(REPO / 'tools/serve_sprites.py'), '--workspace-root', str(root),
+        server = subprocess.Popen([sys.executable, str(REPO / 'main.py'), '--workspace-root', str(root),
                                    '--port', str(port), '--no-browser'], cwd=REPO,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:

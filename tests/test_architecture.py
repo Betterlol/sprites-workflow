@@ -8,14 +8,14 @@ import unittest
 from pathlib import Path
 from typing import get_type_hints
 
-TOOLS = Path(__file__).resolve().parents[1] / "tools"
-sys.path.insert(0, str(TOOLS))
+SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC))
 from check_sprite_architecture import check
 
 
 class ArchitectureTests(unittest.TestCase):
     def test_package_boundaries_and_runtime_cycles(self):
-        self.assertEqual(check(TOOLS / "sprite_pipeline"), [])
+        self.assertEqual(check(SRC / "sprite_pipeline"), [])
 
     def test_checker_detects_backwards_import_and_cycle(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -33,7 +33,7 @@ class ArchitectureTests(unittest.TestCase):
             self.assertTrue(any("Runtime import cycle" in e for e in errors))
 
     def test_public_annotations_resolve_and_facades_export_real_symbols(self):
-        root = TOOLS / "sprite_pipeline"
+        root = SRC / "sprite_pipeline"
         for path in root.rglob("*.py"):
             name = "sprite_pipeline." + ".".join(path.relative_to(root).with_suffix("").parts)
             module = importlib.import_module(name)

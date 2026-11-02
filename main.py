@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 import threading
 import webbrowser
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local Sprite Workbench")
     parser.add_argument("--config", type=Path, help="Open an existing pipeline.json directly (including legacy layouts)")
-    parser.add_argument("--workspace-root", type=Path, default=Path(__file__).resolve().parents[1] / "workspaces")
+    parser.add_argument("--workspace-root", type=Path, default=Path(__file__).resolve().parent / "workspaces")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
@@ -21,7 +24,7 @@ def main() -> None:
         import uvicorn
         from sprite_pipeline.server import create_app
     except ImportError as error:
-        parser.exit(1, f"Missing dependency: {error}. Install: python -m pip install -r tools/requirements-workbench.txt\n")
+        parser.exit(1, f"Missing dependency: {error}. Install: python -m pip install -r src/requirements-workbench.txt\n")
     app = create_app(args.config, args.workspace_root)
     url = f"http://127.0.0.1:{args.port}"
     print(f"Sprite Workbench: {url}\nWorkspaces: {args.workspace_root.resolve()}", flush=True)

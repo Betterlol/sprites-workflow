@@ -1,7 +1,7 @@
 // No npm dependencies: run with node tests/test_workbench_model.mjs.
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-const dragPlayerSource = await readFile(new URL('../tools/sprite_pipeline/web/player.js',import.meta.url),'utf8');
+const dragPlayerSource = await readFile(new URL('../src/sprite_pipeline/web/player.js',import.meta.url),'utf8');
 const {Player:DragPlayer} = await import('data:text/javascript;base64,' + Buffer.from(dragPlayerSource).toString('base64'));
 const paints = [];
 const canvasPlayer = Object.create(DragPlayer.prototype);
@@ -12,10 +12,10 @@ Object.assign(canvasPlayer,{size:[32,32],index:1,options:{reference:true,onion:t
 canvasPlayer.draw();
 assert.deepEqual(paints,[['idle',0,0,0.22],['previous',0,0,0.28],['current',12,-5,1]],
   'Single-frame movement translates the current sprite while idle and previous-frame alignment references stay fixed');
-const {actionSteps,reviewSteps,editFrames,roundMs,reconcileReviewRanges} = await import(new URL('../tools/sprite_pipeline/web/model.js',import.meta.url));
+const {actionSteps,reviewSteps,editFrames,roundMs,reconcileReviewRanges} = await import(new URL('../src/sprite_pipeline/web/model.js',import.meta.url));
 
 // Unified resource contracts; added with this feature, intentionally not run at delivery.
-const {resolveResource,reconcileCompositeAnimations,validateComposition,ensureSlots} = await import(new URL('../tools/sprite_pipeline/web/resources.js',import.meta.url));
+const {resolveResource,reconcileCompositeAnimations,validateComposition,ensureSlots} = await import(new URL('../src/sprite_pipeline/web/resources.js',import.meta.url));
 const composed = {defaults:{fps:12},actions:{
   base:{fps:20,loop:true,sprites:['red.png','green.png']},
   combo:{slots:[{id:'begin',resource:{kind:'action',ref:'base'}},{id:'middle',resource:{kind:'sequence',ref:'bridge'},speed:2},{id:'hold',resource:{kind:'sprite',ref:'red.png'},duration_ms:80,repeat:2}]},
@@ -68,7 +68,7 @@ reconcileReviewRanges(data);
 assert.deepEqual(data.workbench.reviews.sample.clips[0],{action:'rest',start:0,end:0,repeat:1});
 let mergeModule;
 try {
-  const mergeSource = await readFile(new URL('../tools/sprite_pipeline/web/merge.js',import.meta.url),'utf8');
+  const mergeSource = await readFile(new URL('../src/sprite_pipeline/web/merge.js',import.meta.url),'utf8');
   mergeModule = await import('data:text/javascript;base64,' + Buffer.from(mergeSource).toString('base64'));
 } catch {}
 assert.equal(typeof mergeModule?.mergeDraft,'function','Three-way merge model is available');
@@ -102,7 +102,7 @@ assert.deepEqual(mergeModule.resolveMerge(settingsMerge).anchor.pixels,[16,32],
   'Merged pixels must be derived from the resolved canvas and normalized anchor');
 let layoutModule;
 try {
-  const layoutSource = await readFile(new URL('../tools/sprite_pipeline/web/layout.js',import.meta.url),'utf8');
+  const layoutSource = await readFile(new URL('../src/sprite_pipeline/web/layout.js',import.meta.url),'utf8');
   layoutModule = await import('data:text/javascript;base64,' + Buffer.from(layoutSource).toString('base64'));
 } catch {}
 assert.equal(typeof layoutModule?.clampPanel,'function','Adjustable panels need shared geometry');
@@ -111,7 +111,7 @@ assert.equal(layoutModule.clampPanel(100,1440,300,'left'),210,'Materials keep a 
 assert.equal(layoutModule.clampPanel(900,1440,260,'right'),460,'Inspector has a readable maximum');
 assert.equal(layoutModule.clampTimeline(400,500),240,'Timeline leaves enough room for canvas and controls');
 assert.equal(layoutModule.savedSize('broken',260),260,'Malformed saved widths use defaults');
-const playerSource = await readFile(new URL('../tools/sprite_pipeline/web/player.js',import.meta.url),'utf8');
+const playerSource = await readFile(new URL('../src/sprite_pipeline/web/player.js',import.meta.url),'utf8');
 const {Player} = await import('data:text/javascript;base64,' + Buffer.from(playerSource).toString('base64'));
 let imageCount = 0;
 globalThis.Image = class {
@@ -143,7 +143,7 @@ assert.equal(player.loading,true);
 player.images.get('/frame/1').load();
 player.tick(200);
 assert.equal(player.index,1,'Playback resumes at the next frame after it loads');
-const slicingText = await (await import('node:fs/promises')).readFile(new URL('../tools/sprite_pipeline/web/slicing.js',import.meta.url),'utf8');
+const slicingText = await (await import('node:fs/promises')).readFile(new URL('../src/sprite_pipeline/web/slicing.js',import.meta.url),'utf8');
 const slicing = await import('data:text/javascript;base64,' + Buffer.from(slicingText).toString('base64'));
 assert.deepEqual(slicing.resizeRegion([10,10,30,30],'move',[100,-50],[60,60]),[40,0,60,20]);
 assert.deepEqual(slicing.resizeRegion([10,10,30,30],'se',[100,100],[60,60]),[10,10,60,60]);
@@ -153,7 +153,7 @@ assert.deepEqual(slicing.hitRegion([[10,10,30,30]],0,[20,20],2),{index:0,handle:
 assert.equal(slicing.hitRegion([[10,10,30,30]],0,[40,40],2),null);
 console.log('Workbench model: timing, review boundaries, display remapping and slice geometry passed.');
 
-const adjustmentText = await readFile(new URL('../tools/sprite_pipeline/web/adjustment.js',import.meta.url),'utf8');
+const adjustmentText = await readFile(new URL('../src/sprite_pipeline/web/adjustment.js',import.meta.url),'utf8');
 const adjustment = await import('data:text/javascript;base64,' + Buffer.from(adjustmentText).toString('base64'));
 const ordered = [{ref:'a/001.png',duration_ms:83,frame:0},{ref:'b/000.png',duration_ms:125,frame:1},{ref:'a/001.png',duration_ms:42,frame:2}];
 const previewFrames = [{ref:'a/001.png',id:'001',url:'draft-a',version:'new'}];

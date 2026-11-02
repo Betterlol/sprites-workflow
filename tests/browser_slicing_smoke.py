@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright, expect
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / 'tools'))
+sys.path.insert(0, str(REPO / 'src'))
 from sprite_pipeline.projects import ProjectStore
 
 OUTPUT = REPO / '.playwright-mcp' / 'slicing-loop'
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='sprite-ui-qa-') as temporary:
     project.save(data,snap['revision'])
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
-    server=subprocess.Popen([sys.executable,str(REPO/'tools/serve_sprites.py'),'--workspace-root',str(root),'--port',str(port),'--no-browser'],cwd=REPO,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    server=subprocess.Popen([sys.executable,str(REPO/'main.py'),'--workspace-root',str(root),'--port',str(port),'--no-browser'],cwd=REPO,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     url=f'http://127.0.0.1:{port}'
     try:
         for _ in range(100):

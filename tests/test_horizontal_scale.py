@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sprite_pipeline.domain.models import CanvasSpec
 from sprite_pipeline.imaging.processing import normalize, process_frames
