@@ -1,21 +1,20 @@
-# Sprite Workbench development
+# Agent 工作入口
 
-## 按任务选读
+按本次任务查阅相关资料，以当前代码和工程状态为准，不要求每次通读全部文档。
 
-- 制作、扩展或修复动画：读 [制作流程](docs/agents/artwork-workflow.md)、目标工程 README 和 pipeline.json，再执行 `python tools/projects.py status <工程ID>`。目录规则见 [workspaces/README.md](workspaces/README.md)。
-- 修改代码：读 [开发指南](docs/agents/development.md) 与 [架构](docs/development/architecture.md)。
-- 仅改文档：按 [文档目录](docs/README.md) 更新链接与说明，不操作素材或 pipeline.json，不重处理或运行功能测试。
-- CLI 参数、数据格式和可选技巧按需查阅，不要求逐项通读。历史方案不是当前规范。
+## 按任务阅读
 
-## 共同边界
+- 了解项目与启动方式：从 [README](README.md) 开始。
+- 修改代码或查找实现：参考[项目结构](docs/structure.md)与[设计理念](docs/design.md)，再阅读相关代码。
+- 查询功能、操作命令与参数：参考[操作命令](docs/commands.md)，详细参数使用对应入口的 `--help`。
+- 编辑配置、逐帧覆盖或资源编排：参考[配置与资源组合](docs/configuration.md)，核对字段、身份与范围语义。
+- 制作、扩展或修复 sprites：从 [工作指导](agent/normal/README.md) 进入，按需阅读工作方法和视觉检查。
+- 需要具体制作技巧、工程操作或交付步骤：使用 [sprite-workflow skill](agent/skills/sprite-workflow/SKILL.md)，按场景选读，不要求每次加载全部参考。
 
-- 工程操作使用 `tools/projects.py`，保留配置 / 素材版本检查、进程锁和网页草稿保护；不覆盖他人修改。导入使用重复 --file，删除使用重复 --ref，保留动作和序列的引用保护。
-- 不擅自迁移、删除、重建或整理现有 assets 和无关工程。测试使用临时工程与合成图片。
-- 遵守用户本次范围和测试要求，沿用已有批准与授权。用户自行测试网页时不启动浏览器测试。未检查的结果如实列为待验收。
-- 美术制作的必需规则集中在制作流程；技巧按需选用。不要求固定模板、逐步截图或重复记录已有信息。
+## 协作约定
 
-## 代码验证
-
-用户未限制测试时执行 `python -m unittest discover -s tests -v`、`node tests/test_workbench_model.mjs`、`node tests/test_workbench_session.mjs`。纯文档修改只检查链接和 diff。其他开发检查见 [维护指南](docs/development/contributing.md)。
-
-启动网页使用 `python tools/serve_sprites.py`，无需前端构建。
+- 遵守本次任务范围，沿用已有授权；影响目标或制作方向的歧义才需要询问。
+- 保留用户未提交修改与无关成果，不顺手迁移、删除或整理素材工程。
+- 工程操作使用项目提供的入口，保留版本检查、进程锁与引用保护。
+- 验证范围与改动相称。仅改文档时检查链接、内容和 diff，不运行功能测试或素材处理。
+- 交付时简要说明结果、实际检查范围与待确认项，不将程序检查通过等同于视觉验收通过。
