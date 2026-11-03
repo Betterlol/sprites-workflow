@@ -1,6 +1,25 @@
 # 工程操作：从任务到命令
 
-以下示例从仓库根目录执行，`demo`、文件名、动作与 Review 均需换成实际对象。按任务选段执行，每条命令检查退出码与 JSON 结果，失败后先排查；不要整页连续运行。自定义工作区在子命令前增加 `--workspace-root`。完整参数见[命令参考](../../../../docs/commands.md)，字段见[配置参考](../../../../docs/configuration.md)。
+以下示例从仓库根目录执行，`demo`、文件名、动作与 Review 均需换成实际对象。按任务选段执行，每条命令检查退出码与 JSON 结果，失败后先排查；不要整页连续运行。字段与示例见本 skill 内的[配置与资源组合](configuration.md)。
+
+## 环境与工程入口
+
+需要 Python 3.10+；仅使用本页 CLI 时，依赖由 `src/requirements-sprites.txt` 提供。环境尚未安装依赖时，在选定的 Python 环境执行：
+
+```powershell
+python -m pip install -r src/requirements-sprites.txt
+```
+
+默认操作仓库 `workspaces/` 下的工程，工程 ID 是目录名。自定义位置使用全局参数 `--workspace-root "D:/SpriteProjects"`，放在子命令之前；其他示例也要使用同一工作区。`--json` 使输出紧凑，省略仍输出 JSON。成功退出码为 `0`，操作失败或检查不通过为 `1`，参数错误为 `2`。
+
+新任务确实需要独立工程时才新建，已有工程直接读取状态：
+
+```powershell
+python src/projects.py create "示例角色" --id demo --width 640 --height 640 --anchor-x 0.5 --anchor-y 0.9
+python src/projects.py --workspace-root "D:/SpriteProjects" --json list
+```
+
+创建不会覆盖已有目录；尺寸与锚点按本次目标选择。`--id` 省略时使用名称作为目录名，`640×640` 和锚点 `0.5, 0.9` 是默认值，不是角色制作标准。
 
 ## 读取状态与版本
 
@@ -38,7 +57,7 @@ if ($LASTEXITCODE -ne 0) { throw "读取工程失败" }
 [System.IO.File]::WriteAllText("draft.json", ($spriteState.data | ConvertTo-Json -Depth 100), [System.Text.UTF8Encoding]::new($false))
 ```
 
-在 `draft.json` 中只修改目标原图 `process.overrides` 下的稳定帧 ID，保留其他内容；写法见配置参考的[逐帧处理覆盖](../../../../docs/configuration.md#逐帧处理覆盖)。核对影响范围后保存：
+在 `draft.json` 中只修改目标原图 `process.overrides` 下的稳定帧 ID，保留其他内容；写法见[逐帧处理覆盖](configuration.md#逐帧处理覆盖)。核对影响范围后保存：
 
 ```powershell
 python src/projects.py save demo --data "draft.json" --revision $spriteState.revision
@@ -72,7 +91,7 @@ python src/projects.py qa demo --action fall --mode runtime --output "qa/fall-ru
 
 查看 `report.json` 的 `steps`、`ref`、`duration_ms` 和来源信息，并实际播放。范围按所选模式的展开步计算，从 0 开始且包含 `end`。重复边界是否去掉依据真实姿态与停留；同一 PNG 连续出现可能是有意停顿。
 
-在完整草稿中保存目标动作及独立的预期组成 Review，语法见[动作与槽位](../../../../docs/configuration.md#动作与槽位)。例如配置参考的 `jump_land` / `jump_land_check`：保留 `rise` 全段，只有确认 `fall` 首步重复时才设 `start: 1`。动作引用保留子资源各步时长，复合片段用 `speed` 调速。
+在完整草稿中保存目标动作及独立的预期组成 Review，语法和合并示例见[动作与 Review](configuration.md#动作与-review)。示例中的 `jump_land` / `jump_land_check` 保留 `rise` 全段，只有确认 `fall` 首步重复时才设 `start: 1`。动作引用保留子资源各步时长，复合片段用 `speed` 调速。
 
 ```powershell
 python src/projects.py check-composition demo --action jump_land --review jump_land_check
@@ -82,7 +101,9 @@ python src/projects.py qa demo --review jump_land_check --output "qa/jump-land-r
 
 Review 使用 `runtime`，不附加 `qa --mode`；预期组成来自计划采用的各段，避免仅引用最终动作自身做自我比较。检查 `valid`、`first_mismatch`、两侧步数、总时长与边界；工具无法表达预期时直接比较展开记录。
 
-只查局部接缝时可用 `qa --sequence` 提供显式 `steps` 和实际毫秒时长。`qa --ref` 使用工程默认 FPS，不宜替代带不同逐步时长的真实接缝。临时 `steps` 不会创建持久化 Review，也不应直接拿局部片段与完整动作做相等比较。
+`qa` 的输入四选一：`--action`、`--review`、重复的 `--ref`、`--sequence`。只有动作接受 `--mode runtime`（默认）或 `--mode display`；Review 使用自身保存的模式，另外两种输入不附加 `--mode`。
+
+只查局部接缝时可用 `qa --sequence "sequence.json"` 提供显式 `steps` 和实际毫秒时长，格式见[临时播放序列](configuration.md#临时播放序列)。`qa --ref` 使用工程默认 FPS，不宜替代带不同逐步时长的真实接缝。临时 `steps` 不会创建持久化 Review，也不应直接拿局部片段与完整动作做相等比较。
 
 先检查每段及过渡两侧，再检查完整动作和实际前后动作；有多个入口或中断位置时检查实际使用的边界。共享 PNG 或子动作变动后，复查受影响的组合。配置、图片或时序变化后重新生成相关证据，不沿用旧目录的结论。
 
@@ -99,9 +120,11 @@ python src/projects.py export demo --format all --action jump_land --output "del
 python src/projects.py check-export demo --archive "delivery/jump-land-v1.zip" --format all --action jump_land
 ```
 
-QA 目录和 ZIP 都必须是新路径；QA 输出放在原图、正式帧和参考目录之外。格式按交付需求选择，示例 `all` 同时包含游戏帧、图集与展示动画。显式给 `check-export` 预期格式和动作，避免仅检查包内已有内容而漏掉整个缺失项。
+QA 目录和 ZIP 都必须是新路径；QA 输出放在原图、正式帧和参考目录之外。`export --format` 支持 `frames`（动作 PNG）、`atlas`（PNG 图集与 TexturePacker JSON）、`webp`、`gif`、`all` 和 `project`（默认完整工程备份）；CLI 不提供 `review` 导出格式。示例 `all` 同时包含游戏帧、图集与 WebP、GIF。
 
-实际查看导出图片和动画的透明、尺寸、顺序与节奏。`report.json` 保留配置与图片摘要以及逐步时序；编码可能合并相同画面，GIF 时长存在取整，不能只数编码帧判断漏帧。程序结果不证明视觉质量，也不证明游戏内接入成功。
+资源导出用重复的 `--action` 选择动作，也可重复 `--exclude-action` 在选择后排除；不指定动作时从全部动作开始，工程备份不支持排除动作。`check-export` 接受资源格式及重复的 `--action` 指定预期内容，避免仅检查包内已有内容而漏掉整个缺失项。
+
+按本 skill 的[视觉检查](visual-review.md)实际查看导出图片和动画的透明、尺寸、顺序与节奏。`report.json` 保留配置与图片摘要以及逐步时序；编码可能合并相同画面，GIF 时长存在取整，不能只数编码帧判断漏帧。程序结果不证明视觉质量，也不证明游戏内接入成功。
 
 只需完整工程备份时使用 `export --format project`；该格式不属于 `check-export` 的资源包检查范围。交付记录简记采用来源、变体对应、时序取舍和检查版本；未实际查看的部分明确待验收。
 
@@ -113,5 +136,3 @@ QA 目录和 ZIP 都必须是新路径；QA 输出放在原图、正式帧和参
 | 保存规则后直接交付旧正式帧 | 确认是否需要 `apply`；保留人工修图并核对当前采用版本 |
 | 依据编号选边界、给整段统一 FPS | 从最终运行时展开选择位置，保留实际逐步时长 |
 | 用成功导出替代验收 | 核对包内容，再实际查看目标播放与前后衔接 |
-
-[返回 skill](../SKILL.md) · [制作技巧](production.md)
