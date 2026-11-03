@@ -19,4 +19,5 @@ python main.py
 
 - [项目结构](docs/structure.md)：代码职责、入口和工程文件布局。
 - [功能与操作命令](docs/commands.md)：网页功能、命令用途和常用参数。
+- [配置与资源组合](docs/configuration.md)：JSON 输入、逐帧覆盖、动作槽位与 Review 格式。
 - [设计理念](docs/design.md)：数据、编辑与导出的核心约定。

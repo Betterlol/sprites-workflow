@@ -17,7 +17,7 @@
 ├── tests/                      Python、JavaScript 与浏览器测试
 ├── workspaces/                 本机素材工程
 ├── images/                     界面截图
-├── docs/                       项目结构、操作命令与设计理念
+├── docs/                       项目结构、命令、配置参考与设计理念
 ├── README.md                   项目简介与安装启动
 └── pyproject.toml              Python 静态检查配置
 ```

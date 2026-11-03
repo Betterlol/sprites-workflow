@@ -2,6 +2,8 @@
 
 以下命令均从仓库根目录执行。示例中的 `demo` 是工程目录名，`walk.png`、`walk` 和 `transition` 分别代表已有原图、动作和 Review；使用时替换为实际名称。安装方式见 [README](../README.md)。
 
+`draft.json`、`extract.json` 的内容，以及逐帧覆盖、动作槽位和持久化 Review 的写法，见[配置与资源组合](configuration.md)。`--help` 说明命令参数，JSON 字段语义以该参考为准。
+
 ## 网页工作台
 
 | 功能 | 支持的操作 |

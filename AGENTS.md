@@ -7,6 +7,7 @@
 - 了解项目与启动方式：从 [README](README.md) 开始。
 - 修改代码或查找实现：参考[项目结构](docs/structure.md)与[设计理念](docs/design.md)，再阅读相关代码。
 - 查询功能、操作命令与参数：参考[操作命令](docs/commands.md)，详细参数使用对应入口的 `--help`。
+- 编辑配置、逐帧覆盖或资源编排：参考[配置与资源组合](docs/configuration.md)，核对字段、身份与范围语义。
 - 制作、扩展或修复 sprites：从 [工作指导](agent/normal/README.md) 进入，按需阅读工作方法和视觉检查。
 
 ## 协作约定
