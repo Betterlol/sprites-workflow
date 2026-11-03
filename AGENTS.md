@@ -9,6 +9,7 @@
 - 查询功能、操作命令与参数：参考[操作命令](docs/commands.md)，详细参数使用对应入口的 `--help`。
 - 编辑配置、逐帧覆盖或资源编排：参考[配置与资源组合](docs/configuration.md)，核对字段、身份与范围语义。
 - 制作、扩展或修复 sprites：从 [工作指导](agent/normal/README.md) 进入，按需阅读工作方法和视觉检查。
+- 需要具体制作技巧、工程操作或交付步骤：使用 [sprite-workflow skill](agent/skills/sprite-workflow/SKILL.md)，按场景选读，不要求每次加载全部参考。
 
 ## 协作约定
 

@@ -21,3 +21,4 @@ python main.py
 - [功能与操作命令](docs/commands.md)：网页功能、命令用途和常用参数。
 - [配置与资源组合](docs/configuration.md)：JSON 输入、逐帧覆盖、动作槽位与 Review 格式。
 - [设计理念](docs/design.md)：数据、编辑与导出的核心约定。
+- [Sprites 工作指导](agent/normal/README.md)：Agent 的制作方法、视觉检查及具体操作 skill。
